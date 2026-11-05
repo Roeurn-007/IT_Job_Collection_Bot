@@ -2,10 +2,10 @@
   "name": "it-job-collection-bot",
   "version": "1.0.0",
   "description": "IT Job Collection Telegram Bot and Dashboard",
-  "main": "server.js",
+  "main": "src/server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "node src/server.js",
+    "dev": "node src/server.js"
   },
   "engines": {
     "node": ">=18.0.0"

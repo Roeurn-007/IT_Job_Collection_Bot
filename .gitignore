@@ -1,5 +1,7 @@
 node_modules/
 .env
 data/seen.json
+storage/seen.json
+logs/
 uploads/
 *.log
