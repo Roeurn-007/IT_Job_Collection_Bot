@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IT Job Collection Bot — Telegram Aggregator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Sticky App Header -->
+  <header class="app-header">
+    <div class="header-container">
+      <div class="header-brand">
+        <div class="logo-wrapper">
+          <img class="bot-logo" src="/IT_Job_Collection_Roeurn_Rors.png" alt="IT Job Collection Bot" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🤖</text></svg>'" />
+          <span class="status-pulse" id="statusPulse" title="Bot system live"></span>
+        </div>
+        <div class="brand-text">
+          <div class="brand-title-row">
+            <h1 class="brand-title">IT Job Collection</h1>
+            <span class="badge badge-accent">Bot v2.0</span>
+          </div>
+          <p class="brand-tag">Real-time Telegram IT job aggregator & channel monitor</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- Live status & Auto refresh -->
+        <button id="btnAutoRefresh" class="action-btn auto-refresh-btn active" title="Toggle 15s auto-refresh">
+          <span class="refresh-indicator"></span>
+          <span class="auto-refresh-text">Auto (15s)</span>
+        </button>
+
+        <!-- Channels explorer button -->
+        <button id="btnOpenChannels" class="action-btn" title="View Monitored Channels">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span>Channels (<span id="headerChannelsCount">50</span>)</span>
+        </button>
+
+        <!-- Saved jobs button -->
+        <button id="btnSavedView" class="action-btn" title="View Bookmarked Jobs">
+          <svg class="icon star-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          <span>Saved (<span id="savedCountBadge">0</span>)</span>
+        </button>
+
+        <!-- Refresh button -->
+        <button id="btnRefresh" class="action-btn icon-only" title="Refresh Now (R)">
+          <svg class="icon" id="refreshIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+        </button>
+
+        <!-- Dark/Light Theme toggle -->
+        <button id="btnThemeToggle" class="action-btn icon-only" title="Toggle Light / Dark Mode">
+          <svg class="icon sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          <svg class="icon moon-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <!-- Interactive Metrics Summary -->
+    <section class="stats-overview">
+      <div class="stat-card" id="statCardTotal" title="Click to show all jobs">
+        <div class="stat-icon-wrapper blue">
+          <svg class="stat-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+        </div>
+        <div class="stat-info">
+          <span class="stat-label">Total Collected</span>
+          <span class="stat-number" id="statTotal">--</span>
+          <span class="stat-hint">Active database posts</span>
+        </div>
+      </div>
+
+      <div class="stat-card clickable" id="statCardToday" title="Click to filter jobs posted today">
+        <div class="stat-icon-wrapper emerald">
+          <svg class="stat-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </div>
+        <div class="stat-info">
+          <div class="stat-row">
+            <span class="stat-label">Today's Jobs</span>
+            <span class="badge badge-emerald">Live</span>
+          </div>
+          <span class="stat-number" id="statToday">--</span>
+          <span class="stat-hint">New opportunities today</span>
+        </div>
+      </div>
+
+      <div class="stat-card clickable" id="statCardSources" title="Click to view channels list">
+        <div class="stat-icon-wrapper purple">
+          <svg class="stat-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <div class="stat-info">
+          <span class="stat-label">Channels Scraped</span>
+          <span class="stat-number" id="statSources">--</span>
+          <span class="stat-hint">Public telegram sources</span>
+        </div>
+      </div>
+
+      <div class="stat-card clickable" id="statCardSaved" title="Click to view saved bookmarks">
+        <div class="stat-icon-wrapper amber">
+          <svg class="stat-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        </div>
+        <div class="stat-info">
+          <span class="stat-label">Saved Jobs</span>
+          <span class="stat-number" id="statSaved">0</span>
+          <span class="stat-hint">In your bookmarks</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Role Specialization Fast Pills Carousel -->
+    <section class="category-strip">
+      <div class="category-pills" id="categoryPills">
+        <button class="cat-pill active" data-role="">⚡ All Roles</button>
+        <button class="cat-pill" data-role="fullstack">⚡ Full Stack</button>
+        <button class="cat-pill" data-role="frontend">💻 Frontend</button>
+        <button class="cat-pill" data-role="backend">🛠 Backend</button>
+        <button class="cat-pill" data-role="mobile">📱 Mobile (Flutter/iOS)</button>
+        <button class="cat-pill" data-role="qa">🧪 QA & Testing</button>
+        <button class="cat-pill" data-role="devops">☁️ DevOps & Cloud</button>
+        <button class="cat-pill" data-role="data">🧠 Data & AI</button>
+        <button class="cat-pill" data-role="uiux">🎨 UI/UX Design</button>
+        <button class="cat-pill" data-role="junior">🎓 Junior / Intern</button>
+      </div>
+    </section>
+
+    <!-- Search & Filter Controls Hub -->
+    <section class="control-hub">
+      <div class="search-primary-row">
+        <div class="search-box">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="searchInput" placeholder="Search IT jobs by title, keyword, skill, company, or channel (Press '/' to focus)..." autocomplete="off" />
+          <button id="searchClear" class="search-clear hidden" title="Clear search">×</button>
+          <div class="search-shortcut"><kbd>/</kbd></div>
+        </div>
+
+        <div class="view-controls">
+          <select id="sortSelect" class="custom-select" title="Sort order">
+            <option value="newest" selected>🔥 Today & Newest First</option>
+            <option value="oldest">📅 Oldest First</option>
+            <option value="source">📢 By Channel</option>
+          </select>
+
+          <div class="view-mode-toggle" title="Switch layout">
+            <button id="btnViewGrid" class="view-toggle-btn active" title="Grid View">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            </button>
+            <button id="btnViewList" class="view-toggle-btn" title="List View">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            </button>
+          </div>
+
+          <button id="btnExport" class="action-btn" title="Export jobs as JSON">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span>Export</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Results Header -->
+    <section class="results-header">
+      <div class="results-count-wrapper">
+        <h2 class="section-title">Collected Opportunities</h2>
+        <span class="results-counter" id="resultsCounter">Showing <strong id="countFiltered">0</strong> of <span id="countTotal">0</span> posts</span>
+      </div>
+      <div class="last-sync-time" id="lastSyncTime">Updated just now</div>
+    </section>
+
+    <!-- Job Cards Grid / List -->
+    <section id="jobsContainer" class="jobs-grid">
+      <!-- Injected by JavaScript -->
+    </section>
+
+    <!-- Empty State -->
+    <div id="emptyState" class="empty-state hidden">
+      <div class="empty-icon">🔍</div>
+      <h3 class="empty-title">No matching jobs found</h3>
+      <p class="empty-desc">Try loosening your search keywords or clear current filters to discover more IT job openings.</p>
+      <button id="btnEmptyReset" class="btn-primary">Clear All Filters</button>
+    </div>
+  </main>
+
+  <!-- Job Details Modal Drawer -->
+  <div id="jobModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-meta-top">
+          <span class="source-tag" id="modalSourceBadge">@channel</span>
+          <span class="modal-category-tag" id="modalCategoryBadge">Full Stack</span>
+          <span class="modal-date" id="modalDate">Today</span>
+        </div>
+        <button id="modalClose" class="modal-close-btn" title="Close (Esc)">×</button>
+      </div>
+
+      <div class="modal-body" id="modalBody">
+        <!-- Image Preview if available -->
+        <div id="modalImageContainer" class="modal-image-container hidden">
+          <img id="modalImage" class="modal-job-image" src="" alt="Job Flyer" />
+        </div>
+
+        <!-- Highlight Banner (Salary / Quick Info) -->
+        <div id="modalSalaryBanner" class="modal-salary-banner hidden">
+          <div class="salary-icon">💰</div>
+          <div class="salary-text">
+            <span class="salary-caption">Offered Salary / Compensation</span>
+            <span class="salary-amount" id="modalSalaryAmount">Negotiable</span>
+          </div>
+        </div>
+
+        <!-- Job Description Full Text -->
+        <div class="modal-section">
+          <h4 class="modal-section-title">Job Details & Requirements</h4>
+          <div class="modal-text-content" id="modalFullText"></div>
+        </div>
+
+        <!-- Extracted Contacts & Links -->
+        <div id="modalContactsSection" class="modal-contacts-section hidden">
+          <h4 class="modal-section-title">Quick Apply & Contacts</h4>
+          <div class="contacts-grid" id="modalContactsGrid"></div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <div class="modal-nav-buttons">
+          <button id="btnModalPrev" class="action-btn" title="Previous Job (Left Arrow)">← Prev</button>
+          <button id="btnModalNext" class="action-btn" title="Next Job (Right Arrow)">Next →</button>
+        </div>
+
+        <div class="modal-action-buttons">
+          <button id="btnModalBookmark" class="action-btn" title="Bookmark Job">
+            <svg class="icon star-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            <span id="modalBookmarkLabel">Save</span>
+          </button>
+          <button id="btnModalCopy" class="action-btn" title="Copy Job Description">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <span>Copy Text</span>
+          </button>
+          <a id="btnModalTelegram" href="#" target="_blank" rel="noopener noreferrer" class="btn-primary telegram-btn">
+            <svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 0 0-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/></svg>
+            <span>Open in Telegram →</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Channels Explorer Modal -->
+  <div id="channelsModal" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="modal-dialog channels-dialog">
+      <div class="modal-header">
+        <div>
+          <h3 class="modal-title">Monitored Telegram Channels</h3>
+          <p class="modal-subtitle">The bot actively monitors these Cambodian & regional IT channels</p>
+        </div>
+        <button id="channelsModalClose" class="modal-close-btn">×</button>
+      </div>
+
+      <div class="channels-filter-row">
+        <input id="channelsSearchInput" type="text" placeholder="Search channels by name..." />
+      </div>
+
+      <div class="channels-list" id="channelsListContainer">
+        <!-- Injected by JavaScript -->
+      </div>
+
+      <div class="modal-footer">
+        <button id="channelsModalCloseBtn" class="action-btn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
