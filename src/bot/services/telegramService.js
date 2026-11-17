@@ -20,6 +20,32 @@ const bot = new TelegramBot(settings.TELEGRAM_BOT_TOKEN, {
   request: { agent: httpsAgent }
 });
 
+let cachedBotUsername = (settings && settings.BOT_USERNAME) || 'facescan_roeurn_bot';
+
+async function getBotUsername() {
+  if (cachedBotUsername) return cachedBotUsername;
+  try {
+    const me = await bot.getMe();
+    if (me && me.username) {
+      cachedBotUsername = me.username;
+      return cachedBotUsername;
+    }
+  } catch (err) {
+    // Non-fatal, return fallback
+  }
+  return cachedBotUsername || 'facescan_roeurn_bot';
+}
+
+// Pre-fetch bot identity on startup
+bot.getMe().then((me) => {
+  if (me && me.username) {
+    cachedBotUsername = me.username;
+    logger.info(`Bot identity verified: @${me.username} (ID: ${me.id})`);
+  }
+}).catch((err) => {
+  logger.warn('Failed to pre-fetch bot identity:', err.message);
+});
+
 function isPrivate(msg) {
   return msg && msg.chat && msg.chat.type === 'private';
 }
@@ -43,7 +69,7 @@ function isAdmin(userOrMsg) {
 function requireAdmin(msg) {
   if (!isAdmin(msg)) {
     if (!isPrivate(msg)) {
-      bot.deleteMessage(msg.chat.id, msg.message_id).catch(() => {});
+      notifyNonAdminAndRedirect(msg);
     } else {
       safeSend(msg.chat.id, '⛔ Access denied: This command is restricted to administrators only.');
     }
@@ -103,6 +129,8 @@ async function deleteMessage(chatId, messageId) {
 }
 
 async function deliverToUserOrRedirect(msg, commandName, executeFn) {
+  if (!msg || !msg.chat) return;
+
   const userId = msg.from ? msg.from.id : null;
   const isBotUser = !!(msg.from && msg.from.is_bot);
 
@@ -123,56 +151,66 @@ async function deliverToUserOrRedirect(msg, commandName, executeFn) {
 
   // 3. Post reply in group telling the user to use the command directly with the bot
   const label = commandName === 'recent' ? 'recent jobs' : commandName;
-  let botUser = '';
-  try {
-    const botInfo = await bot.getMe();
-    if (botInfo && botInfo.username) botUser = botInfo.username;
-  } catch (_) {}
+  const botUser = await getBotUsername();
 
   const keyboard = [];
   if (botUser) {
     keyboard.push([{ text: `💬 Open in Bot Chat`, url: `https://t.me/${botUser}?start=${commandName}` }]);
   }
 
-  const redirectHint = await bot.sendMessage(
-    msg.chat.id,
-    `👋 Hello ${name}, you need to chat directly with the bot to view ${label}.\n\n👇 Tap below to open bot chat:`,
-    keyboard.length ? { reply_markup: { inline_keyboard: keyboard } } : {}
-  ).catch(() => null);
+  let redirectHint = null;
+  try {
+    redirectHint = await bot.sendMessage(
+      msg.chat.id,
+      `👋 Hello ${name}, you need to chat directly with the bot to view ${label}.\n\n👇 Tap below to open bot chat:`,
+      keyboard.length ? { reply_markup: { inline_keyboard: keyboard } } : {}
+    );
+    if (redirectHint && redirectHint.message_id) {
+      logger.info(`Command redirect notice sent to ${name} in ${msg.chat.id} (hint #${redirectHint.message_id}, auto-cleans in 12s)`);
+    }
+  } catch (err) {
+    logger.error(`Failed to send command redirect in ${msg.chat.id}:`, err.message);
+  }
 
-  // 4. Auto-remove BOTH the user's comment AND the bot's response after 5 seconds
+  // 4. Auto-remove BOTH the user's comment AND the bot's response after 12 seconds
   setTimeout(() => {
-    bot.deleteMessage(msg.chat.id, msg.message_id).catch(() => {});
+    if (msg.message_id) {
+      bot.deleteMessage(msg.chat.id, msg.message_id).catch(() => {});
+    }
     if (redirectHint && redirectHint.message_id) {
       bot.deleteMessage(msg.chat.id, redirectHint.message_id).catch(() => {});
     }
-  }, 5000);
+  }, 12000);
 }
 
-const redirectCooldowns = new Map();
+// Active notice tracking: key = `${chatId}:${userId}` -> { messageId, timer }
+const activeUserNotices = new Map();
 
 async function notifyNonAdminAndRedirect(msg) {
-  const userId = msg.from ? msg.from.id : null;
+  if (!msg || !msg.chat || !msg.chat.id) return;
+
+  const chatId = msg.chat.id;
+  const messageId = msg.message_id;
+  const userId = msg.from ? msg.from.id : (msg.sender_chat ? msg.sender_chat.id : null);
   const senderName = msg.from
     ? `${msg.from.first_name || ''} ${msg.from.last_name || ''} (@${msg.from.username || msg.from.id})`.trim()
-    : 'Unknown member';
+    : (msg.sender_chat ? (msg.sender_chat.title || 'Channel') : 'Unknown member');
 
   // 1. Immediately delete the non-admin message/media
-  bot.deleteMessage(msg.chat.id, msg.message_id)
-    .then(() => {
-      logger.autoDelete(msg.message_id, senderName, msg.chat.id);
-    })
-    .catch((err) => {
-      logger.error(`Delete failed for #${msg.message_id} in ${msg.chat.id}:`, err.message);
-    });
+  if (messageId) {
+    bot.deleteMessage(chatId, messageId)
+      .then(() => {
+        logger.autoDelete(messageId, senderName, chatId);
+      })
+      .catch((err) => {
+        logger.error(`Delete failed for #${messageId} in ${chatId}:`, err.message);
+      });
+  }
 
-  // 2. Cooldown guard: Avoid spamming redirect notice if user sends multiple messages rapidly
-  if (userId) {
-    const lastNotified = redirectCooldowns.get(userId) || 0;
-    if (Date.now() - lastNotified < 10000) {
-      return;
-    }
-    redirectCooldowns.set(userId, Date.now());
+  // 2. Cooldown guard: If an active notice is already displayed for this user in this group, avoid spam
+  const noticeKey = `${chatId}:${userId || 'anonymous'}`;
+  if (activeUserNotices.has(noticeKey)) {
+    return;
   }
 
   // 3. Format user display name
@@ -183,14 +221,12 @@ async function notifyNonAdminAndRedirect(msg) {
     } else if (msg.from.first_name && msg.from.first_name.toLowerCase() !== 'group') {
       name = msg.from.first_name;
     }
+  } else if (msg.sender_chat && msg.sender_chat.title) {
+    name = msg.sender_chat.title;
   }
 
-  // 4. Retrieve bot username dynamically
-  let botUsername = '';
-  try {
-    const me = await bot.getMe();
-    if (me && me.username) botUsername = me.username;
-  } catch (_) {}
+  // 4. Retrieve bot username (from memory cache or API)
+  const botUsername = await getBotUsername();
 
   const keyboard = [];
   if (botUsername) {
@@ -198,21 +234,39 @@ async function notifyNonAdminAndRedirect(msg) {
   }
 
   // 5. Send polite warning notice to user
-  const noticeMsg = await bot.sendMessage(
-    msg.chat.id,
+  const noticeText =
     `👋 Hello ${name}!\n\n` +
     `🚫 Non-admin messages are not allowed in this group.\n` +
     `📌 This group is exclusively reserved for IT job announcements.\n\n` +
     `💬 Please chat directly with the bot for job search, commands, or assistance:` +
-    (botUsername ? `\n👉 @${botUsername}` : ''),
-    keyboard.length ? { reply_markup: { inline_keyboard: keyboard } } : {}
-  ).catch(() => null);
+    (botUsername ? `\n👉 @${botUsername}` : '');
 
-  // 6. Auto-remove the bot's notice after 6 seconds so the group stays 100% clean
+  let noticeMsg = null;
+  try {
+    noticeMsg = await bot.sendMessage(
+      chatId,
+      noticeText,
+      keyboard.length ? { reply_markup: { inline_keyboard: keyboard } } : {}
+    );
+    if (noticeMsg && noticeMsg.message_id) {
+      logger.info(`Redirect notice sent to non-admin ${senderName} in ${chatId} (notice #${noticeMsg.message_id}, auto-cleans in 15s)`);
+    }
+  } catch (err) {
+    logger.error(`Failed to send redirect notice to ${chatId}:`, err.message);
+    return;
+  }
+
+  // 6. Keep notice visible for 15 seconds so user has time to read and click, then auto-delete
   if (noticeMsg && noticeMsg.message_id) {
-    setTimeout(() => {
-      bot.deleteMessage(msg.chat.id, noticeMsg.message_id).catch(() => {});
-    }, 6000);
+    const timer = setTimeout(() => {
+      bot.deleteMessage(chatId, noticeMsg.message_id).catch(() => {});
+      activeUserNotices.delete(noticeKey);
+    }, 15000);
+
+    activeUserNotices.set(noticeKey, {
+      messageId: noticeMsg.message_id,
+      timer
+    });
   }
 }
 
@@ -225,6 +279,7 @@ module.exports = {
   safeSend,
   deleteMessage,
   deliverToUserOrRedirect,
-  notifyNonAdminAndRedirect
+  notifyNonAdminAndRedirect,
+  getBotUsername
 };
 

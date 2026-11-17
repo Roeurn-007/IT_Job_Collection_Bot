@@ -171,11 +171,84 @@ async function testFullSuite() {
 
   console.log('  ✅ All Express APIs and Dashboard routes verified.\n');
 
+  // -----------------------------------------------------------------
+  // 6. GROUP AUTO-MODERATION & REDIRECT NOTICE VERIFICATION
+  // -----------------------------------------------------------------
+  console.log('STEP 6: Group Auto-Moderation & Redirect Notice Verification');
+  const {
+    isAdmin,
+    isAllowedNonAdminCommand,
+    notifyNonAdminAndRedirect
+  } = require('../src/bot/services/telegramService');
+
+  // Test 6.1: Admin vs Non-Admin detection
+  const adminMsg = { from: { id: settings.ADMIN_IDS[0] }, chat: { id: '-1004469567529' } };
+  const nonAdminMsg = { from: { id: '1122334455', username: 'jobseeker_cambodia', first_name: 'Sokha' }, chat: { id: '-1004469567529' }, message_id: 888, text: 'Hello, any IT job vacancies today?' };
+  
+  assert.strictEqual(isAdmin(adminMsg), true, 'Admin message must be recognized as admin');
+  assert.strictEqual(isAdmin(nonAdminMsg), false, 'Non-admin message must NOT be recognized as admin');
+  console.log('  • Admin vs Non-admin identity verification passed ✅');
+
+  // Test 6.2: Allowed vs Prohibited command filtering
+  assert.strictEqual(isAllowedNonAdminCommand('/start'), true);
+  assert.strictEqual(isAllowedNonAdminCommand('/status'), true);
+  assert.strictEqual(isAllowedNonAdminCommand('/recent'), true);
+  assert.strictEqual(isAllowedNonAdminCommand('/channels'), true);
+  assert.strictEqual(isAllowedNonAdminCommand('hello world'), false);
+  assert.strictEqual(isAllowedNonAdminCommand('/admin'), false);
+  assert.strictEqual(isAllowedNonAdminCommand('/setexpiry 45'), false);
+  assert.strictEqual(isAllowedNonAdminCommand(undefined), false);
+  console.log('  • Allowed vs Prohibited message/command filter verified ✅');
+
+  // Test 6.3: Mock dispatch of notifyNonAdminAndRedirect
+  const { bot } = require('../src/bot/services/telegramService');
+  let deletedMsgId = null;
+  let sentNotice = null;
+  const originalDelete = bot.deleteMessage;
+  const originalSend = bot.sendMessage;
+
+  bot.deleteMessage = async (cId, mId) => {
+    deletedMsgId = mId;
+    return true;
+  };
+  bot.sendMessage = async (cId, text, opts) => {
+    sentNotice = { cId, text, opts };
+    return { message_id: 999 };
+  };
+
+  try {
+    await notifyNonAdminAndRedirect(nonAdminMsg);
+
+    assert.strictEqual(deletedMsgId, 888, 'Non-admin user message must be immediately deleted');
+    assert(sentNotice, 'Bot must send redirect notice to group');
+    assert(sentNotice.text.includes('👋 Hello @jobseeker_cambodia!'), 'Notice must greet user by handle');
+    assert(sentNotice.text.includes('🚫 Non-admin messages are not allowed in this group.'), 'Notice must explain group restriction');
+    assert(sentNotice.text.includes('📌 This group is exclusively reserved for IT job announcements.'), 'Notice must explain group purpose');
+    assert(sentNotice.text.includes('💬 Please chat directly with the bot'), 'Notice must prompt direct chat');
+    assert(sentNotice.opts && sentNotice.opts.reply_markup && sentNotice.opts.reply_markup.inline_keyboard, 'Notice must have inline keyboard button');
+    
+    const btn = sentNotice.opts.reply_markup.inline_keyboard[0][0];
+    assert.strictEqual(btn.text, '💬 Chat Directly with Bot');
+    assert(btn.url.includes('https://t.me/'), 'Button must link to bot direct chat');
+    console.log('  • Redirect notice formatting, greeting, and inline keyboard button verified ✅');
+
+    // Test 6.4: Anti-spam cooldown prevention
+    let duplicateNoticeSent = false;
+    bot.sendMessage = async () => { duplicateNoticeSent = true; return { message_id: 1000 }; };
+    await notifyNonAdminAndRedirect({ ...nonAdminMsg, message_id: 889 });
+    assert.strictEqual(duplicateNoticeSent, false, 'Duplicate warning must not be spammed while previous notice is active');
+    console.log('  • Anti-spam notice cooldown protection verified ✅');
+  } finally {
+    bot.deleteMessage = originalDelete;
+    bot.sendMessage = originalSend;
+  }
+
+  console.log('  ✅ Group Auto-Moderation & Redirect Notice 100% verified.\n');
+
   console.log('===============================================================');
   console.log('🎉 ALL SYSTEMS VERIFIED! PRODUCTION READY WITH 0 ERRORS');
   console.log('===============================================================');
 
-  const { bot } = require('../src/bot/services/telegramService');
   if (bot && typeof bot.stopPolling === 'function') {
     await bot.stopPolling().catch(() => {});
   }
