@@ -38,6 +38,7 @@ const adminState = {};
 // -------------------------------------------------------------
 
 function getAdminControlPanelMarkup() {
+  const chatLabel = settings.allowUserChat ? '💬 Chat: 🔓 Open' : '💬 Chat: 🔒 Restricted';
   return {
     inline_keyboard: [
       [
@@ -50,14 +51,66 @@ function getAdminControlPanelMarkup() {
       ],
       [
         { text: `⏳ Expiry: ${settings.expiryDays}d`, callback_data: 'admin_menu_expiry' },
-        { text: '📊 Bot Status', callback_data: 'admin_status' }
+        { text: chatLabel, callback_data: 'admin_menu_chat' }
       ],
       [
         { text: '🚀 Forward Jobs to Group', callback_data: 'admin_forward_prompt' },
+        { text: '📊 Bot Status', callback_data: 'admin_status' }
+      ],
+      [
         { text: '⚡ Run Live Scan Now', callback_data: 'admin_run_scan' }
       ]
     ]
   };
+}
+
+function getChatMenuMarkup() {
+  const isAllowed = settings.allowUserChat;
+  return {
+    inline_keyboard: [
+      [
+        {
+          text: `${!isAllowed ? '✅ ' : ''}🔒 Restricted (Jobs Only - Auto-Delete Chat)`,
+          callback_data: 'chat_set_restricted'
+        }
+      ],
+      [
+        {
+          text: `${isAllowed ? '✅ ' : ''}🔓 Allowed (Open Chat - Members Can Text)`,
+          callback_data: 'chat_set_allowed'
+        }
+      ],
+      [
+        { text: '🔙 Back to Admin Menu', callback_data: 'admin_main' }
+      ]
+    ]
+  };
+}
+
+function formatChatMenuText() {
+  const isAllowed = settings.allowUserChat;
+  return (
+    `💬 Group Chat Moderation Settings\n\n` +
+    `📌 Current Group Status: ${isAllowed ? '🔓 ALLOWED (Open Chat)' : '🔒 RESTRICTED (Jobs Only)'}\n\n` +
+    `How it works:\n` +
+    `• 🔒 Restricted (Default):\n` +
+    `  Regular members cannot send chat, photos, or media in the group. The bot auto-removes non-admin messages and shows a polite 15s redirect notice pointing to the bot chat.\n\n` +
+    `• 🔓 Allowed:\n` +
+    `  Regular members CAN send text and chat freely in the group. The bot will NOT auto-remove their messages.\n\n` +
+    `💡 Tap an option below to toggle this setting:`
+  );
+}
+
+function formatChatUpdatedResponse(isAllowed) {
+  const time = formatPhnomPenhDate(new Date()).display;
+  return (
+    `✅ Group Chat Permission Updated!\n\n` +
+    `📌 New Status: ${isAllowed ? '🔓 ALLOWED (Open Chat)' : '🔒 RESTRICTED (Jobs Only)'}\n` +
+    `🕒 Time: ${time}\n\n` +
+    (isAllowed
+      ? `🎉 Normal members are now ALLOWED to type and send messages in the group. The bot will NOT auto-remove them.`
+      : `🛡️ Group is now RESTRICTED. Non-admin messages will be auto-removed and redirected to bot chat.`)
+  );
 }
 
 function getExpiryMenuMarkup() {
@@ -430,6 +483,7 @@ async function sendStatus(targetChatId, isAdminUser = false) {
     : '';
   const sourcesLine = isAdminUser ? `📡 Active Sources: ${settings.getSources().length}\n` : '';
   const maxAgeLine = isAdminUser ? `📅 Max Post Age: ${settings.maxAgeDays} days\n` : '';
+  const chatLine = isAdminUser ? `💬 Group Chat: ${settings.allowUserChat ? '🔓 ALLOWED (Open Chat)' : '🔒 RESTRICTED (Jobs Only)'}\n` : '';
 
   const dbStatus = supabaseService.isConfigured() ? 'Supabase 🟢' : 'Local Storage 📁';
 
@@ -442,6 +496,7 @@ async function sendStatus(targetChatId, isAdminUser = false) {
     sourcesLine +
     sinkLine +
     maxAgeLine +
+    chatLine +
     `🔍 IT Keywords: ${keywords.length}\n` +
     `👁️ Processed Posts: ${getSeenCount()}\n` +
     `💾 Database Storage: ${dbStatus}\n` +
@@ -455,6 +510,7 @@ async function sendStatus(targetChatId, isAdminUser = false) {
             { text: `⏳ Expiry (${settings.expiryDays}d)`, callback_data: 'admin_menu_expiry' }
           ],
           [
+            { text: `💬 Chat: ${settings.allowUserChat ? '🔓 Open' : '🔒 Restricted'}`, callback_data: 'admin_menu_chat' },
             { text: '🛠️ Admin Panel', callback_data: 'admin_main' }
           ]
         ]
@@ -811,6 +867,7 @@ bot.on('callback_query', async (query) => {
       `• 🎯 Destination Sinks: Set destination group(s) & mode (Groups/Bot Chat/Both)\n` +
       `• 📅 Max Age: Configure maximum age of jobs to collect (1-365 days)\n` +
       `• ⏳ Expiration: Auto-purge jobs older than ${settings.expiryDays} days from DB & Web\n` +
+      `• 💬 Group Chat: ${settings.allowUserChat ? '🔓 Allowed (Open Chat)' : '🔒 Restricted (Jobs Only)'}\n` +
       `• 🚀 Forward Jobs: Pull and forward custom number of recent jobs to group(s)\n` +
       `• 📊 Bot Status: Overview of bot uptime, jobs, and channels\n` +
       `• ⚡ Live Scan: Force an immediate scrape across all channels now\n\n` +
@@ -1189,6 +1246,53 @@ bot.on('callback_query', async (query) => {
     );
   }
 
+  // --- Group Chat Moderation Handlers ---
+  if (data === 'admin_menu_chat') {
+    delete adminState[fromId];
+    return editOrSend(chatId, messageId,
+      formatChatMenuText(),
+      getChatMenuMarkup()
+    );
+  }
+
+  if (data === 'chat_set_restricted') {
+    delete adminState[fromId];
+    settings.allowUserChat = false;
+    settings.saveSink();
+    bot.answerCallbackQuery(query.id, { text: '🔒 Group chat restricted (Jobs only)!' }).catch(() => {});
+    return editOrSend(chatId, messageId,
+      formatChatUpdatedResponse(false),
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '💬 Group Chat Settings', callback_data: 'admin_menu_chat' }],
+            [{ text: '📊 Bot Status', callback_data: 'admin_status' }],
+            [{ text: '🛠️ Admin Panel', callback_data: 'admin_main' }]
+          ]
+        }
+      }
+    );
+  }
+
+  if (data === 'chat_set_allowed') {
+    delete adminState[fromId];
+    settings.allowUserChat = true;
+    settings.saveSink();
+    bot.answerCallbackQuery(query.id, { text: '🔓 Group chat opened (Members can text)!' }).catch(() => {});
+    return editOrSend(chatId, messageId,
+      formatChatUpdatedResponse(true),
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '💬 Group Chat Settings', callback_data: 'admin_menu_chat' }],
+            [{ text: '📊 Bot Status', callback_data: 'admin_status' }],
+            [{ text: '🛠️ Admin Panel', callback_data: 'admin_main' }]
+          ]
+        }
+      }
+    );
+  }
+
   if (data === 'admin_status') {
     delete adminState[fromId];
     return sendStatus(chatId, true);
@@ -1279,6 +1383,11 @@ bot.on('message', (msg) => {
     return;
   }
 
+  // If admin has allowed normal members to chat in the group, do not auto-remove their messages
+  if (settings.allowUserChat) {
+    return;
+  }
+
   if (!isAllowedNonAdminCommand(msg.text)) {
     notifyNonAdminAndRedirect(msg);
   }
@@ -1295,6 +1404,9 @@ bot.onText(/^\/start(?:\s+(.+))?/i, async (msg, match) => {
       const adminHelp = isAdmin(msg)
         ? `\n\n⚙️ Admin Commands:\n` +
           `• /admin - open BotFather control panel\n` +
+          `• /groupchat - toggle normal member chat (open / restricted)\n` +
+          `• /allowchat - allow members to text in group\n` +
+          `• /blockchat - restrict group to jobs only\n` +
           `• /maxage - edit max post age filter\n` +
           `• /sinkmode - choose sink mode (group/bot/both)\n` +
           `• /setsink - set group sink ID or mode\n` +
@@ -1330,6 +1442,9 @@ bot.onText(/^\/start(?:\s+(.+))?/i, async (msg, match) => {
       `You can customize and manage all bot features easily with clickable buttons just like in BotFather.\n\n` +
       `💡 Key Commands:\n` +
       `• /admin - open BotFather Control Panel\n` +
+      `• /groupchat - toggle normal member chat permission (open / restricted)\n` +
+      `• /allowchat - allow members to text in group\n` +
+      `• /blockchat - restrict group to jobs only\n` +
       `• /expiry - view or change expiration retention (default: 60 days)\n` +
       `• /setexpiry <days> - set retention period (e.g. /setexpiry 60)\n` +
       `• /cleanup - manually run database & web purge\n` +
@@ -1472,6 +1587,50 @@ bot.onText(/^\/(?:expiry|setexpiry|cleanupdays)(?:\s+(.+))?/i, async (msg, m) =>
         [{ text: '🛠️ Admin Panel', callback_data: 'admin_main' }]
       ]
     }
+  });
+});
+
+bot.onText(/^\/groupchat(?:\s+(.+))?/i, async (msg, match) => {
+  if (!requireAdmin(msg)) return;
+  const arg = match && match[1] ? match[1].trim().toLowerCase() : '';
+
+  if (['on', 'allow', 'open', 'enable', 'true', '1'].includes(arg)) {
+    settings.allowUserChat = true;
+    settings.saveSink();
+    return safeSend(msg.chat.id, formatChatUpdatedResponse(true), {
+      reply_markup: getChatMenuMarkup()
+    });
+  }
+
+  if (['off', 'block', 'lock', 'restrict', 'disable', 'false', '0'].includes(arg)) {
+    settings.allowUserChat = false;
+    settings.saveSink();
+    return safeSend(msg.chat.id, formatChatUpdatedResponse(false), {
+      reply_markup: getChatMenuMarkup()
+    });
+  }
+
+  // Interactive toggle menu
+  return safeSend(msg.chat.id, formatChatMenuText(), {
+    reply_markup: getChatMenuMarkup()
+  });
+});
+
+bot.onText(/^\/allowchat/i, async (msg) => {
+  if (!requireAdmin(msg)) return;
+  settings.allowUserChat = true;
+  settings.saveSink();
+  return safeSend(msg.chat.id, formatChatUpdatedResponse(true), {
+    reply_markup: getChatMenuMarkup()
+  });
+});
+
+bot.onText(/^\/blockchat/i, async (msg) => {
+  if (!requireAdmin(msg)) return;
+  settings.allowUserChat = false;
+  settings.saveSink();
+  return safeSend(msg.chat.id, formatChatUpdatedResponse(false), {
+    reply_markup: getChatMenuMarkup()
   });
 });
 

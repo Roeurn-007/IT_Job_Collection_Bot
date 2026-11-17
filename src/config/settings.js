@@ -69,6 +69,7 @@ let adminSink = '';
 let sinkMode = 'group'; // 'group' | 'admin' | 'both'
 let maxAgeDays = parseInt(process.env.MAX_AGE_DAYS || '30', 10);
 let expiryDays = parseInt(process.env.EXPIRY_DAYS || '60', 10);
+let allowUserChat = process.env.ALLOW_USER_CHAT === 'true'; // false = normal messages blocked in group, true = allowed
 
 if (typeof rawSinkConfig === 'string' && !isPlaceholder(rawSinkConfig)) {
   groupSinks = [rawSinkConfig];
@@ -89,6 +90,9 @@ if (typeof rawSinkConfig === 'string' && !isPlaceholder(rawSinkConfig)) {
   if (rawSinkConfig.expiryDays) {
     const parsed = parseInt(rawSinkConfig.expiryDays, 10);
     if (!isNaN(parsed) && parsed > 0) expiryDays = parsed;
+  }
+  if (typeof rawSinkConfig.allowUserChat === 'boolean') {
+    allowUserChat = rawSinkConfig.allowUserChat;
   }
 }
 
@@ -117,7 +121,8 @@ function saveSink() {
     groupSink: primaryGroup,
     adminSink,
     maxAgeDays,
-    expiryDays
+    expiryDays,
+    allowUserChat
   });
 }
 
@@ -242,6 +247,8 @@ module.exports = {
   set maxAgeDays(val) { maxAgeDays = val; },
   get expiryDays() { return expiryDays; },
   set expiryDays(val) { expiryDays = val; },
+  get allowUserChat() { return allowUserChat; },
+  set allowUserChat(val) { allowUserChat = Boolean(val); },
   getPrimaryGroupSink,
   getPrimarySink,
   saveSink,

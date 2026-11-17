@@ -42,6 +42,7 @@ app.get('/api/status', async (req, res) => {
     adminSink: settings.adminSink,
     maxAgeDays: settings.maxAgeDays,
     expiryDays: settings.expiryDays,
+    allowUserChat: settings.allowUserChat,
     keywords,
     channels: channels.length,
     channelsList: channels,

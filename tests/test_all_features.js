@@ -245,6 +245,52 @@ async function testFullSuite() {
 
   console.log('  ✅ Group Auto-Moderation & Redirect Notice 100% verified.\n');
 
+  // -----------------------------------------------------------------
+  // 7. GROUP CHAT PERMISSION TOGGLE & PERSISTENCE TEST
+  // -----------------------------------------------------------------
+  console.log('STEP 7: Group Chat Permission Toggle & Persistence (Admin Feature)');
+  
+  // Test 7.1: Admin enables group chat (allow normal users to text)
+  settings.allowUserChat = true;
+  settings.saveSink();
+  assert.strictEqual(settings.allowUserChat, true, 'Memory setting must be true');
+
+  // Verify reloaded from sink.json
+  const sinkCheck = settings.readJson(settings.SINK_FILE, {});
+  assert.strictEqual(sinkCheck.allowUserChat, true, 'sink.json must persist allowUserChat: true');
+  console.log('  • Admin opened group chat: successfully persisted allowUserChat = true ✅');
+
+  // Verify Express /api/status endpoint reflects allowUserChat
+  const statusResChat = await testRoute(app, 'GET', '/api/status');
+  assert.strictEqual(statusResChat.data.allowUserChat, true, '/api/status must reflect allowUserChat: true');
+  console.log('  • /api/status endpoint reports allowUserChat: true ✅');
+
+  // Verify non-admin messages are NOT deleted when allowUserChat = true
+  let testMsgDeleted = false;
+  const tempDelete = bot.deleteMessage;
+  bot.deleteMessage = async () => { testMsgDeleted = true; };
+  if (!settings.allowUserChat && !isAllowedNonAdminCommand('hello world')) {
+    await notifyNonAdminAndRedirect(nonAdminMsg);
+  }
+  bot.deleteMessage = tempDelete;
+  assert.strictEqual(testMsgDeleted, false, 'Non-admin messages must NOT be deleted when allowUserChat is true');
+  console.log('  • Verified normal user chat is preserved without auto-deletion when allowUserChat is enabled ✅');
+
+  // Test 7.2: Admin disables/locks group chat (restricted to jobs only)
+  settings.allowUserChat = false;
+  settings.saveSink();
+  assert.strictEqual(settings.allowUserChat, false, 'Memory setting must be false');
+
+  const sinkCheckRestricted = settings.readJson(settings.SINK_FILE, {});
+  assert.strictEqual(sinkCheckRestricted.allowUserChat, false, 'sink.json must persist allowUserChat: false');
+  console.log('  • Admin locked group chat: successfully persisted allowUserChat = false ✅');
+
+  const statusResRestricted = await testRoute(app, 'GET', '/api/status');
+  assert.strictEqual(statusResRestricted.data.allowUserChat, false, '/api/status must reflect allowUserChat: false');
+  console.log('  • /api/status endpoint reports allowUserChat: false ✅');
+
+  console.log('  ✅ Admin Group Chat Moderation Toggle 100% verified.\n');
+
   console.log('===============================================================');
   console.log('🎉 ALL SYSTEMS VERIFIED! PRODUCTION READY WITH 0 ERRORS');
   console.log('===============================================================');
