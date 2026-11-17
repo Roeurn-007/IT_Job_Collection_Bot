@@ -123,29 +123,32 @@ function startKeepAlive() {
   }, PING_INTERVAL);
 }
 
-// Graceful shutdown handler for Render rolling deploys & restarts
+// Graceful shutdown handler for Render rolling deploys & fast restarts
 function setupGracefulShutdown(serverInstance) {
   const shutdown = async (signal) => {
     logger.info(`Received ${signal}. Shutting down gracefully...`);
+
+    // 1. Immediately close HTTP server to release port 3000 instantly
+    if (serverInstance) {
+      try {
+        serverInstance.close(() => {
+          logger.info('HTTP server closed.');
+        });
+      } catch (_) {}
+    }
+
+    // 2. Stop Telegram bot polling with a 1.5s timeout to avoid 409 Conflict
     try {
       if (bot && typeof bot.stopPolling === 'function') {
         logger.info('Stopping Telegram bot polling to avoid 409 Conflict on next instance...');
-        await bot.stopPolling();
+        await Promise.race([
+          bot.stopPolling(),
+          new Promise(r => setTimeout(r, 1500))
+        ]);
       }
     } catch (_) {}
 
-    if (serverInstance) {
-      serverInstance.close(() => {
-        logger.info('HTTP server closed.');
-        process.exit(0);
-      });
-    } else {
-      process.exit(0);
-    }
-
-    setTimeout(() => {
-      process.exit(1);
-    }, 10000).unref();
+    process.exit(0);
   };
 
   process.once('SIGTERM', () => shutdown('SIGTERM'));
