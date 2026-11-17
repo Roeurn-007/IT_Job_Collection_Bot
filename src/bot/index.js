@@ -48,11 +48,11 @@ function getAdminControlPanelMarkup() {
         { text: `📅 Max Age: ${settings.maxAgeDays}d`, callback_data: 'admin_menu_maxage' }
       ],
       [
-        { text: '🚀 Forward Jobs to Group', callback_data: 'admin_forward_prompt' },
+        { text: `⏳ Expiry: ${settings.expiryDays}d`, callback_data: 'admin_menu_expiry' },
         { text: '📊 Bot Status', callback_data: 'admin_status' }
       ],
       [
-        { text: `🗑️ DB Expiry: ${settings.expiryDays}d`, callback_data: 'admin_menu_expiry' },
+        { text: '🚀 Forward Jobs to Group', callback_data: 'admin_forward_prompt' },
         { text: '⚡ Run Live Scan Now', callback_data: 'admin_run_scan' }
       ]
     ]
@@ -451,7 +451,7 @@ async function sendStatus(targetChatId, isAdminUser = false) {
         inline_keyboard: [
           [
             { text: `📅 Max Age (${settings.maxAgeDays}d)`, callback_data: 'admin_menu_maxage' },
-            { text: `🗑️ Expiry (${settings.expiryDays}d)`, callback_data: 'admin_menu_expiry' }
+            { text: `⏳ Expiry (${settings.expiryDays}d)`, callback_data: 'admin_menu_expiry' }
           ],
           [
             { text: '🛠️ Admin Panel', callback_data: 'admin_main' }
@@ -806,9 +806,10 @@ bot.on('callback_query', async (query) => {
       `🛠️ IT Job Collection Bot — Admin Control Panel\n\n` +
       `Welcome to the Admin Control Panel. You can customize and manage all bot features here just like in BotFather:\n\n` +
       `• 🔍 Keywords: Manage IT job title and skill filter keywords\n` +
-      `• 📢 Scraped Channels: Manage public Telegram channels scanned every 30s\n` +
+      `• 📢 Scraped Channels: Manage public Telegram channels scanned every 90s\n` +
       `• 🎯 Destination Sinks: Set destination group(s) & mode (Groups/Bot Chat/Both)\n` +
       `• 📅 Max Age: Configure maximum age of jobs to collect (1-365 days)\n` +
+      `• ⏳ Expiration: Auto-purge jobs older than ${settings.expiryDays} days from DB & Web\n` +
       `• 🚀 Forward Jobs: Pull and forward custom number of recent jobs to group(s)\n` +
       `• 📊 Bot Status: Overview of bot uptime, jobs, and channels\n` +
       `• ⚡ Live Scan: Force an immediate scrape across all channels now\n\n` +
@@ -1336,6 +1337,9 @@ bot.onText(/^\/start(?:\s+(.+))?/i, async (msg, match) => {
       `You can customize and manage all bot features easily with clickable buttons just like in BotFather.\n\n` +
       `💡 Key Commands:\n` +
       `• /admin - open BotFather Control Panel\n` +
+      `• /expiry - view or change expiration retention (default: 60 days)\n` +
+      `• /setexpiry <days> - set retention period (e.g. /setexpiry 60)\n` +
+      `• /cleanup - manually run database & web purge\n` +
       `• /maxage - edit max post age filter (1-365 days)\n` +
       `• /forwardjobs - forward jobs to group (custom number)\n` +
       `• /sinkmode - choose sink mode (groups/bot/both)\n` +
@@ -1385,9 +1389,10 @@ bot.onText(/^\/admin(?:\s|$|@\w+)/i, (msg) => {
     `🛠️ IT Job Collection Bot — Admin Control Panel\n\n` +
     `Welcome to the Admin Control Panel. You can customize all bot settings directly here just like in BotFather:\n\n` +
     `• 🔍 Keywords: Manage IT job title and skill filter keywords\n` +
-    `• 📢 Scraped Channels: Manage public Telegram channels scanned every 30s\n` +
+    `• 📢 Scraped Channels: Manage public Telegram channels scanned every 90s\n` +
     `• 🎯 Destination Sinks: Set destination group(s) & mode (Groups/Bot Chat/Both)\n` +
     `• 📅 Max Age: Configure maximum age of jobs to collect (1-365 days)\n` +
+    `• ⏳ Expiration: Auto-purge jobs older than ${settings.expiryDays} days from DB & Web\n` +
     `• 🚀 Forward Jobs: Pull and forward custom number of recent jobs to group(s)\n` +
     `• 📊 Bot Status: Overview of bot uptime, jobs, and channels\n` +
     `• ⚡ Live Scan: Force an immediate scrape across all channels now\n\n` +
@@ -1660,14 +1665,16 @@ bot.onText(/^\/removekeyword(?:\s+(.+))?/i, (msg, m) => {
 
 bot.onText(/^\/(?:cleanup|purge)(?:\s|$|@\w+)/i, async (msg) => {
   if (!requireAdmin(msg)) return;
-  safeSend(msg.chat.id, '🧹 Running database cleanup for jobs older than 60 days (2 months)...').catch(() => {});
+  const days = settings.expiryDays || 60;
+  safeSend(msg.chat.id, `🧹 Running database cleanup for jobs older than ${days} days...`).catch(() => {});
   try {
-    const result = await purgeExpiredJobs(60);
+    const result = await purgeExpiredJobs(days);
     const dbMsg = supabaseService.isConfigured()
       ? `• Supabase purged: ${result.supabaseDeleted} jobs\n`
       : '• Supabase: Not configured\n';
     await safeSend(msg.chat.id,
       `✅ Database Cleanup Complete!\n\n` +
+      `• Retention Threshold: ${days} days\n` +
       `• Local DB purged: ${result.localDeleted} jobs\n` +
       dbMsg +
       `• Note: Telegram channel/group history is kept intact.`
