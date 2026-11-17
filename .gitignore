@@ -6,8 +6,9 @@ node_modules/
 .env.local
 .env.production
 
-# Cache & Ephemeral Deduplication
+# Cache & Local Configuration
 storage/seen.json
+storage/sink.json
 
 # Application Logs
 logs/

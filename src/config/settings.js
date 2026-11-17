@@ -56,28 +56,31 @@ const COLLECTED_FILE = path.join(STORAGE_DIR, 'collected.json');
 const SEEN_FILE = path.join(STORAGE_DIR, 'seen.json');
 const SOURCES_FILE = path.join(STORAGE_DIR, 'sources.json');
 
+function isPlaceholder(val) {
+  if (!val) return true;
+  const s = String(val).trim();
+  return s.includes('x') || s.includes('your_') || s.includes('<') || !/^-?\d+$/.test(s);
+}
+
 // Sink Configuration
 let rawSinkConfig = readJson(SINK_FILE, null);
-let groupSinks = [DEFAULT_GROUP_SINK];
-let adminSink = DEFAULT_ADMIN_SINK;
+let groupSinks = [];
+let adminSink = '';
 let sinkMode = 'group'; // 'group' | 'admin' | 'both'
 let maxAgeDays = parseInt(process.env.MAX_AGE_DAYS || '30', 10);
 let expiryDays = parseInt(process.env.EXPIRY_DAYS || '60', 10);
 
-if (typeof rawSinkConfig === 'string') {
-  if (rawSinkConfig === adminSink) {
-    sinkMode = 'admin';
-  } else {
-    groupSinks = [rawSinkConfig];
-    sinkMode = 'group';
-  }
+if (typeof rawSinkConfig === 'string' && !isPlaceholder(rawSinkConfig)) {
+  groupSinks = [rawSinkConfig];
 } else if (rawSinkConfig && typeof rawSinkConfig === 'object') {
-  if (Array.isArray(rawSinkConfig.groupSinks) && rawSinkConfig.groupSinks.length) {
-    groupSinks = rawSinkConfig.groupSinks.map(String).filter(Boolean);
-  } else if (rawSinkConfig.groupSink) {
+  if (Array.isArray(rawSinkConfig.groupSinks)) {
+    groupSinks = rawSinkConfig.groupSinks.map(String).filter(s => !isPlaceholder(s));
+  } else if (rawSinkConfig.groupSink && !isPlaceholder(rawSinkConfig.groupSink)) {
     groupSinks = [String(rawSinkConfig.groupSink)];
   }
-  adminSink = String(rawSinkConfig.adminSink || DEFAULT_ADMIN_SINK);
+  if (rawSinkConfig.adminSink && !isPlaceholder(rawSinkConfig.adminSink)) {
+    adminSink = String(rawSinkConfig.adminSink);
+  }
   sinkMode = rawSinkConfig.sinkMode || 'group';
   if (rawSinkConfig.maxAgeDays) {
     const parsed = parseInt(rawSinkConfig.maxAgeDays, 10);
@@ -87,6 +90,14 @@ if (typeof rawSinkConfig === 'string') {
     const parsed = parseInt(rawSinkConfig.expiryDays, 10);
     if (!isNaN(parsed) && parsed > 0) expiryDays = parsed;
   }
+}
+
+// Always fallback to .env configuration if sink or admin IDs are missing or placeholders
+if (!groupSinks.length && DEFAULT_GROUP_SINK && !isPlaceholder(DEFAULT_GROUP_SINK)) {
+  groupSinks = [DEFAULT_GROUP_SINK];
+}
+if (!adminSink && DEFAULT_ADMIN_SINK && !isPlaceholder(DEFAULT_ADMIN_SINK)) {
+  adminSink = DEFAULT_ADMIN_SINK;
 }
 
 function getPrimaryGroupSink() {
