@@ -13,7 +13,8 @@ const {
   isAllowedNonAdminCommand,
   safeSend,
   deleteMessage,
-  deliverToUserOrRedirect
+  deliverToUserOrRedirect,
+  notifyNonAdminAndRedirect
 } = require('./services/telegramService');
 const {
   forwardJob,
@@ -1279,16 +1280,7 @@ bot.on('message', (msg) => {
   }
 
   if (!isAllowedNonAdminCommand(msg.text)) {
-    const senderName = msg.from
-      ? `${msg.from.first_name || ''} ${msg.from.last_name || ''} (@${msg.from.username || msg.from.id})`.trim()
-      : 'Unknown member';
-    bot.deleteMessage(msg.chat.id, msg.message_id)
-      .then(() => {
-        logger.autoDelete(msg.message_id, senderName, msg.chat.id);
-      })
-      .catch((err) => {
-        logger.error(`Delete failed for #${msg.message_id} in ${msg.chat.id}:`, err.message);
-      });
+    notifyNonAdminAndRedirect(msg);
   }
 });
 

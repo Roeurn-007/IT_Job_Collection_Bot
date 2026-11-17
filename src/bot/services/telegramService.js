@@ -123,19 +123,21 @@ async function deliverToUserOrRedirect(msg, commandName, executeFn) {
 
   // 3. Post reply in group telling the user to use the command directly with the bot
   const label = commandName === 'recent' ? 'recent jobs' : commandName;
-  const botInfo = await bot.getMe().catch(() => ({ username: 'facescan_roeurn_bot' }));
-  const botUser = botInfo.username || 'facescan_roeurn_bot';
+  let botUser = '';
+  try {
+    const botInfo = await bot.getMe();
+    if (botInfo && botInfo.username) botUser = botInfo.username;
+  } catch (_) {}
+
+  const keyboard = [];
+  if (botUser) {
+    keyboard.push([{ text: `💬 Open in Bot Chat`, url: `https://t.me/${botUser}?start=${commandName}` }]);
+  }
 
   const redirectHint = await bot.sendMessage(
     msg.chat.id,
     `👋 Hello ${name}, you need to chat directly with the bot to view ${label}.\n\n👇 Tap below to open bot chat:`,
-    {
-      reply_markup: {
-        inline_keyboard: [[
-          { text: `💬 Open in Bot Chat`, url: `https://t.me/${botUser}?start=${commandName}` }
-        ]]
-      }
-    }
+    keyboard.length ? { reply_markup: { inline_keyboard: keyboard } } : {}
   ).catch(() => null);
 
   // 4. Auto-remove BOTH the user's comment AND the bot's response after 5 seconds
@@ -147,6 +149,73 @@ async function deliverToUserOrRedirect(msg, commandName, executeFn) {
   }, 5000);
 }
 
+const redirectCooldowns = new Map();
+
+async function notifyNonAdminAndRedirect(msg) {
+  const userId = msg.from ? msg.from.id : null;
+  const senderName = msg.from
+    ? `${msg.from.first_name || ''} ${msg.from.last_name || ''} (@${msg.from.username || msg.from.id})`.trim()
+    : 'Unknown member';
+
+  // 1. Immediately delete the non-admin message/media
+  bot.deleteMessage(msg.chat.id, msg.message_id)
+    .then(() => {
+      logger.autoDelete(msg.message_id, senderName, msg.chat.id);
+    })
+    .catch((err) => {
+      logger.error(`Delete failed for #${msg.message_id} in ${msg.chat.id}:`, err.message);
+    });
+
+  // 2. Cooldown guard: Avoid spamming redirect notice if user sends multiple messages rapidly
+  if (userId) {
+    const lastNotified = redirectCooldowns.get(userId) || 0;
+    if (Date.now() - lastNotified < 10000) {
+      return;
+    }
+    redirectCooldowns.set(userId, Date.now());
+  }
+
+  // 3. Format user display name
+  let name = 'there';
+  if (msg.from) {
+    if (msg.from.username) {
+      name = '@' + msg.from.username;
+    } else if (msg.from.first_name && msg.from.first_name.toLowerCase() !== 'group') {
+      name = msg.from.first_name;
+    }
+  }
+
+  // 4. Retrieve bot username dynamically
+  let botUsername = '';
+  try {
+    const me = await bot.getMe();
+    if (me && me.username) botUsername = me.username;
+  } catch (_) {}
+
+  const keyboard = [];
+  if (botUsername) {
+    keyboard.push([{ text: '💬 Chat Directly with Bot', url: `https://t.me/${botUsername}?start=help` }]);
+  }
+
+  // 5. Send polite warning notice to user
+  const noticeMsg = await bot.sendMessage(
+    msg.chat.id,
+    `👋 Hello ${name}!\n\n` +
+    `🚫 Non-admin messages are not allowed in this group.\n` +
+    `📌 This group is exclusively reserved for IT job announcements.\n\n` +
+    `💬 Please chat directly with the bot for job search, commands, or assistance:` +
+    (botUsername ? `\n👉 @${botUsername}` : ''),
+    keyboard.length ? { reply_markup: { inline_keyboard: keyboard } } : {}
+  ).catch(() => null);
+
+  // 6. Auto-remove the bot's notice after 6 seconds so the group stays 100% clean
+  if (noticeMsg && noticeMsg.message_id) {
+    setTimeout(() => {
+      bot.deleteMessage(msg.chat.id, noticeMsg.message_id).catch(() => {});
+    }, 6000);
+  }
+}
+
 module.exports = {
   bot,
   isPrivate,
@@ -155,6 +224,7 @@ module.exports = {
   isAllowedNonAdminCommand,
   safeSend,
   deleteMessage,
-  deliverToUserOrRedirect
+  deliverToUserOrRedirect,
+  notifyNonAdminAndRedirect
 };
 
