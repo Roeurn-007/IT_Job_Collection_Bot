@@ -1,7 +1,23 @@
+# Dependencies
 node_modules/
+
+# Environment Variables & Secrets
 .env
-data/seen.json
+.env.local
+.env.production
+
+# Cache & Ephemeral Deduplication
 storage/seen.json
+
+# Application Logs
 logs/
-uploads/
 *.log
+
+# Uploads & Temp
+uploads/
+tmp/
+temp/
+
+# OS Metadata
+.DS_Store
+Thumbs.db

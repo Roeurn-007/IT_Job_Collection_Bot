@@ -30,3 +30,4 @@ function isPostWithinMaxAge(postDate, maxAgeDays = 30) {
 module.exports = {
   isPostWithinMaxAge
 };
+

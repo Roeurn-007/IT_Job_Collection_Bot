@@ -8,6 +8,27 @@ const { getPhnomPenhDateStr, formatPhnomPenhDate } = require('../../utils/dateUt
 const logger = require('../../utils/logger');
 
 const lastPostId = {};
+let isPolling = false;
+let scraperTimer = null;
+
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Cache-Control': 'no-cache',
+  'Pragma': 'no-cache'
+};
+
+function sanitizeUsername(username) {
+  if (!username) return '';
+  return String(username)
+    .trim()
+    .replace(/^https?:\/\/t\.me\//i, '')
+    .replace(/^t\.me\//i, '')
+    .replace(/^@/, '')
+    .replace(/\/.*$/, '')
+    .trim();
+}
 
 function isSource(chatId) {
   const id = String(chatId);
@@ -69,12 +90,41 @@ async function handleIncoming(msg) {
   await forwardJob(job);
 }
 
+// Helper to fetch channel preview with timeout and 1 transient-error retry
+async function fetchChannelPreview(cleanUsername) {
+  const url = `https://t.me/s/${cleanUsername}`;
+  const maxAttempts = 2;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: BROWSER_HEADERS,
+        signal: AbortSignal.timeout(12000)
+      });
+      return res;
+    } catch (err) {
+      if (attempt < maxAttempts) {
+        await new Promise(r => setTimeout(r, 1200));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 // 2. Scrape a single public channel web preview
 async function scrapeChannel(username) {
+  const cleanUsername = sanitizeUsername(username);
+  if (!cleanUsername) return;
+
   try {
-    const url = `https://t.me/s/${username}`;
-    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } });
-    if (!res.ok) return;
+    const res = await fetchChannelPreview(cleanUsername);
+    if (!res.ok) {
+      if (res.status === 429) {
+        logger.warn(`Rate limit (HTTP 429) received for @${cleanUsername}. Cooling down.`);
+      }
+      return;
+    }
     const html = await res.text();
 
     const postDivs = html.split('<div class="tgme_widget_message_wrap');
@@ -128,15 +178,15 @@ async function scrapeChannel(username) {
       });
     }
 
-    const lastKnown = lastPostId[username] || 0;
+    const lastKnown = lastPostId[cleanUsername] || 0;
     for (const post of candidatePosts) {
-      const key = `${username}_${post.num}`;
+      const key = `${cleanUsername}_${post.num}`;
       if (isDuplicate(key)) continue;
       markSeen(key);
 
       const jobRecord = {
-        source: `@${username}`,
-        sourceId: username,
+        source: `@${cleanUsername}`,
+        sourceId: cleanUsername,
         messageId: post.num,
         snippet: post.text.slice(0, 400),
         text: post.text,
@@ -155,31 +205,62 @@ async function scrapeChannel(username) {
 
     if (candidatePosts.length) {
       const maxNum = Math.max(...candidatePosts.map(p => p.num));
-      if (maxNum > lastKnown) lastPostId[username] = maxNum;
+      if (maxNum > lastKnown) lastPostId[cleanUsername] = maxNum;
     }
   } catch (e) {
-    logger.error(`Channel scraper error for @${username}:`, e.message);
+    const causeCode = e.cause?.code || e.cause?.message || '';
+    const causeStr = causeCode ? ` (${causeCode})` : '';
+    logger.error(`Channel scraper error for @${cleanUsername}: ${e.message}${causeStr}`);
   }
 }
 
-// 3. Automated parallel multi-channel polling
+// 3. Automated parallel multi-channel polling with batch delays and overlap protection
 async function pollChannels() {
-  const channels = settings.getChannels();
-  const BATCH_SIZE = 6;
-  for (let i = 0; i < channels.length; i += BATCH_SIZE) {
-    const batch = channels.slice(i, i + BATCH_SIZE);
-    await Promise.all(batch.map(u => scrapeChannel(u)));
+  if (isPolling) {
+    logger.warn('Previous scraping cycle is still in progress. Skipping to prevent overlap.');
+    return { ok: false, message: 'Scrape already in progress' };
+  }
+  isPolling = true;
+
+  try {
+    const channels = settings.getChannels();
+    const BATCH_SIZE = 4;
+    const BATCH_DELAY_MS = 1500;
+
+    for (let i = 0; i < channels.length; i += BATCH_SIZE) {
+      const batch = channels.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map(u => scrapeChannel(u)));
+      if (i + BATCH_SIZE < channels.length) {
+        await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
+      }
+    }
+    return { ok: true, count: channels.length };
+  } finally {
+    isPolling = false;
+  }
+}
+
+// Chained recursive timer loop prevents overlapping intervals
+async function runScraperLoop() {
+  try {
+    await pollChannels();
+  } catch (err) {
+    logger.error('Scraper loop error:', err.message);
+  } finally {
+    const intervalMs = settings.scrapeIntervalMs || 90000;
+    scraperTimer = setTimeout(runScraperLoop, intervalMs);
   }
 }
 
 function startScraper() {
   const channels = settings.getChannels();
-  setTimeout(pollChannels, 2000);
-  setInterval(pollChannels, 30000);
-  logger.info(`Channel scraper enabled for ${channels.length} channels (parallel batches of 6 every 30s).`);
+  const intervalSec = Math.round((settings.scrapeIntervalMs || 90000) / 1000);
+  setTimeout(runScraperLoop, 2000);
+  logger.info(`Channel scraper enabled for ${channels.length} channels (batches of 4 every ${intervalSec}s).`);
 }
 
 module.exports = {
+  sanitizeUsername,
   isSource,
   sourceLabel,
   buildSourceLink,

@@ -62,6 +62,7 @@ let groupSinks = [DEFAULT_GROUP_SINK];
 let adminSink = DEFAULT_ADMIN_SINK;
 let sinkMode = 'group'; // 'group' | 'admin' | 'both'
 let maxAgeDays = parseInt(process.env.MAX_AGE_DAYS || '30', 10);
+let expiryDays = parseInt(process.env.EXPIRY_DAYS || '60', 10);
 
 if (typeof rawSinkConfig === 'string') {
   if (rawSinkConfig === adminSink) {
@@ -82,6 +83,10 @@ if (typeof rawSinkConfig === 'string') {
     const parsed = parseInt(rawSinkConfig.maxAgeDays, 10);
     if (!isNaN(parsed) && parsed > 0) maxAgeDays = parsed;
   }
+  if (rawSinkConfig.expiryDays) {
+    const parsed = parseInt(rawSinkConfig.expiryDays, 10);
+    if (!isNaN(parsed) && parsed > 0) expiryDays = parsed;
+  }
 }
 
 function getPrimaryGroupSink() {
@@ -100,7 +105,8 @@ function saveSink() {
     groupSinks,
     groupSink: primaryGroup,
     adminSink,
-    maxAgeDays
+    maxAgeDays,
+    expiryDays
   });
 }
 
@@ -120,13 +126,56 @@ function getTargetSinks() {
   return targets;
 }
 
+// Scraping Interval
+const SCRAPE_INTERVAL_SECONDS = parseInt(process.env.SCRAPE_INTERVAL_SECONDS || '90', 10);
+const scrapeIntervalMs = Math.max(30, isNaN(SCRAPE_INTERVAL_SECONDS) ? 90 : SCRAPE_INTERVAL_SECONDS) * 1000;
+
 // Channels & Keywords helpers
+function sanitizeChannel(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+  return raw
+    .trim()
+    .replace(/^https?:\/\/t\.me\//i, '')
+    .replace(/^t\.me\//i, '')
+    .replace(/^@/, '')
+    .replace(/\/.*$/, '')
+    .trim();
+}
+
 function getChannels() {
-  return readJson(CHANNELS_FILE, []);
+  const raw = readJson(CHANNELS_FILE, []);
+  const seen = new Set();
+  const cleaned = [];
+  for (const item of raw) {
+    const c = sanitizeChannel(item);
+    if (c && !seen.has(c.toLowerCase())) {
+      seen.add(c.toLowerCase());
+      cleaned.push(c);
+    }
+  }
+  return cleaned;
 }
 
 function saveChannels(list) {
-  writeJson(CHANNELS_FILE, list);
+  const seen = new Set();
+  const cleaned = [];
+  if (Array.isArray(list)) {
+    for (const item of list) {
+      const c = sanitizeChannel(item);
+      if (c && !seen.has(c.toLowerCase())) {
+        seen.add(c.toLowerCase());
+        cleaned.push(c);
+      }
+    }
+  }
+  writeJson(CHANNELS_FILE, cleaned);
+
+  try {
+    const supabaseService = require('../services/supabaseService');
+    if (supabaseService.isConfigured()) {
+      supabaseService.syncChannelsToSupabase(cleaned).catch(() => {});
+    }
+  } catch (_) {}
 }
 
 function getKeywords() {
@@ -135,6 +184,13 @@ function getKeywords() {
 
 function saveKeywords(list) {
   writeJson(KEYWORDS_FILE, list);
+
+  try {
+    const supabaseService = require('../services/supabaseService');
+    if (supabaseService.isConfigured()) {
+      supabaseService.syncKeywordsToSupabase(list).catch(() => {});
+    }
+  } catch (_) {}
 }
 
 function getSources() {
@@ -173,6 +229,8 @@ module.exports = {
   set adminSink(val) { adminSink = val; },
   get maxAgeDays() { return maxAgeDays; },
   set maxAgeDays(val) { maxAgeDays = val; },
+  get expiryDays() { return expiryDays; },
+  set expiryDays(val) { expiryDays = val; },
   getPrimaryGroupSink,
   getPrimarySink,
   saveSink,
@@ -182,5 +240,9 @@ module.exports = {
   getKeywords,
   saveKeywords,
   getSources,
-  saveSources
+  saveSources,
+  sanitizeChannel,
+  SCRAPE_INTERVAL_SECONDS,
+  scrapeIntervalMs
 };
+

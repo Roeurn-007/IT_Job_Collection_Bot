@@ -5,5 +5,6 @@
   ],
   "groupSink": "-1004469567529",
   "adminSink": "7339961364",
-  "maxAgeDays": 30
+  "maxAgeDays": 30,
+  "expiryDays": 60
 }

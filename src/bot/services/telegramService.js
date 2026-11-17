@@ -157,3 +157,4 @@ module.exports = {
   deleteMessage,
   deliverToUserOrRedirect
 };
+

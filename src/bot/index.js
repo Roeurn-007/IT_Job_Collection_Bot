@@ -2,7 +2,8 @@ const settings = require('../config/settings');
 const logger = require('../utils/logger');
 const { formatPhnomPenhDate, getPhnomPenhDateStr } = require('../utils/dateUtils');
 const { decodeHtmlEntities } = require('../services/jobFilter');
-const { getCollectedJobs } = require('../services/storageService');
+const { getCollectedJobs, purgeExpiredJobs } = require('../services/storageService');
+const supabaseService = require('../services/supabaseService');
 const { getSeenCount } = require('../services/duplicateCheck');
 const {
   bot,
@@ -51,10 +52,59 @@ function getAdminControlPanelMarkup() {
         { text: '📊 Bot Status', callback_data: 'admin_status' }
       ],
       [
+        { text: `🗑️ DB Expiry: ${settings.expiryDays}d`, callback_data: 'admin_menu_expiry' },
         { text: '⚡ Run Live Scan Now', callback_data: 'admin_run_scan' }
       ]
     ]
   };
+}
+
+function getExpiryMenuMarkup() {
+  const current = settings.expiryDays;
+  return {
+    inline_keyboard: [
+      [
+        { text: `${current === 30 ? '✅ ' : ''}30d (1 mo)`, callback_data: 'exp_set_30' },
+        { text: `${current === 60 ? '✅ ' : ''}60d (2 mos)`, callback_data: 'exp_set_60' }
+      ],
+      [
+        { text: `${current === 90 ? '✅ ' : ''}90d (3 mos)`, callback_data: 'exp_set_90' },
+        { text: `${current === 180 ? '✅ ' : ''}180d (6 mos)`, callback_data: 'exp_set_180' }
+      ],
+      [
+        { text: '✏️ Enter Custom Days', callback_data: 'exp_custom_prompt' },
+        { text: '🧹 Purge Expired Now', callback_data: 'exp_purge_now' }
+      ],
+      [
+        { text: '🔙 Back to Admin Menu', callback_data: 'admin_main' }
+      ]
+    ]
+  };
+}
+
+function formatExpiryMenuText() {
+  const currentDays = settings.expiryDays;
+  const dbName = supabaseService.isConfigured() ? 'Supabase 🟢' : 'Local Storage 📁';
+  return (
+    `🗑️ Database Expiration Retention Settings\n\n` +
+    `📌 Current Retention: ${currentDays} Days (~${Math.round(currentDays / 30)} Month${Math.round(currentDays / 30) === 1 ? '' : 's'})\n` +
+    `💾 Active Database: ${dbName}\n\n` +
+    `How it works:\n` +
+    `• Jobs published older than ${currentDays} days are automatically purged from ${dbName} and the web dashboard.\n` +
+    `• 🔒 Safety Guarantee: Messages in Telegram channels and groups are NEVER deleted.\n\n` +
+    `💡 Select a quick retention period below, enter custom days, or run cleanup now:`
+  );
+}
+
+function formatExpiryUpdatedResponse(newDays) {
+  const time = formatPhnomPenhDate(new Date()).display;
+  return (
+    `✅ Database Expiration Retention Updated!\n\n` +
+    `📅 New Retention Period: ${newDays} Day${newDays === 1 ? '' : 's'} (~${Math.round(newDays / 30)} Month${Math.round(newDays / 30) === 1 ? '' : 's'})\n` +
+    `🕒 Time: ${time}\n` +
+    `⚡ Auto-Cleanup Status: ACTIVE (runs every 6 hours and at startup)\n\n` +
+    `ℹ️ Jobs older than ${newDays} day${newDays === 1 ? '' : 's'} will be automatically purged from the database and web dashboard. Telegram channel messages are kept intact.`
+  );
 }
 
 function getKeywordsMenuMarkup() {
@@ -380,6 +430,8 @@ async function sendStatus(targetChatId, isAdminUser = false) {
   const sourcesLine = isAdminUser ? `📡 Active Sources: ${settings.getSources().length}\n` : '';
   const maxAgeLine = isAdminUser ? `📅 Max Post Age: ${settings.maxAgeDays} days\n` : '';
 
+  const dbStatus = supabaseService.isConfigured() ? 'Supabase 🟢' : 'Local Storage 📁';
+
   return await safeSend(targetChatId,
     `📊 IT Job Collection Bot Status\n\n` +
     `🕒 Time (Cambodia): ${nowInfo.display}\n` +
@@ -391,12 +443,17 @@ async function sendStatus(targetChatId, isAdminUser = false) {
     maxAgeLine +
     `🔍 IT Keywords: ${keywords.length}\n` +
     `👁️ Processed Posts: ${getSeenCount()}\n` +
-    `⚡ Auto-Monitor Interval: 30 seconds`,
+    `💾 Database Storage: ${dbStatus}\n` +
+    `🗑️ DB Auto-Cleanup: Active (Retention: ${settings.expiryDays} days)\n` +
+    `⚡ Auto-Monitor Interval: ${settings.SCRAPE_INTERVAL_SECONDS} seconds`,
     isAdminUser ? {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: `📅 Edit Max Age (${settings.maxAgeDays}d)`, callback_data: 'admin_menu_maxage' },
+            { text: `📅 Max Age (${settings.maxAgeDays}d)`, callback_data: 'admin_menu_maxage' },
+            { text: `🗑️ Expiry (${settings.expiryDays}d)`, callback_data: 'admin_menu_expiry' }
+          ],
+          [
             { text: '🛠️ Admin Panel', callback_data: 'admin_main' }
           ]
         ]
@@ -562,7 +619,7 @@ bot.on('message', async (msg) => {
 
   // 4. Add channel
   if (state.action === 'add_channel') {
-    const u = text.replace(/^@/, '').trim();
+    const u = settings.sanitizeChannel(text);
     delete adminState[adminId];
     if (!u) {
       return safeSend(msg.chat.id, '⚠️ Please provide a valid channel username (e.g. cambodiajobs).', {
@@ -592,7 +649,7 @@ bot.on('message', async (msg) => {
 
   // 5. Remove channel
   if (state.action === 'remove_channel') {
-    const u = text.replace(/^@/, '').trim();
+    const u = settings.sanitizeChannel(text);
     delete adminState[adminId];
     let channels = settings.getChannels();
     const totalBefore = channels.length;
@@ -694,6 +751,30 @@ bot.on('message', async (msg) => {
         inline_keyboard: [
           [{ text: '📊 Bot Status', callback_data: 'admin_status' }],
           [{ text: '📅 Edit Max Age', callback_data: 'admin_menu_maxage' }],
+          [{ text: '🛠️ Admin Panel', callback_data: 'admin_main' }]
+        ]
+      }
+    });
+  }
+
+  // 10. Set custom database expiration retention in days
+  if (state.action === 'set_custom_expiry') {
+    const val = parseInt(text.trim(), 10);
+    delete adminState[adminId];
+    if (isNaN(val) || val < 1 || val > 1000) {
+      return safeSend(msg.chat.id,
+        `⚠️ Invalid number of days. Please enter a number between 1 and 1000 (e.g. 30, 60, 90), or tap Cancel below.`,
+        { reply_markup: getCancelMarkup('admin_menu_expiry') }
+      );
+    }
+    settings.expiryDays = val;
+    settings.saveSink();
+    await purgeExpiredJobs(val);
+    return safeSend(msg.chat.id, formatExpiryUpdatedResponse(settings.expiryDays), {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📊 Bot Status', callback_data: 'admin_status' }],
+          [{ text: '🗑️ Edit Expiry Retention', callback_data: 'admin_menu_expiry' }],
           [{ text: '🛠️ Admin Panel', callback_data: 'admin_main' }]
         ]
       }
@@ -1036,6 +1117,76 @@ bot.on('callback_query', async (query) => {
     );
   }
 
+  // --- Database Expiry Cleanup Handlers ---
+  if (data === 'admin_menu_expiry') {
+    delete adminState[fromId];
+    return editOrSend(chatId, messageId,
+      formatExpiryMenuText(),
+      getExpiryMenuMarkup()
+    );
+  }
+
+  if (data && data.startsWith('exp_set_')) {
+    delete adminState[fromId];
+    const days = parseInt(data.replace('exp_set_', ''), 10) || 60;
+    settings.expiryDays = days;
+    settings.saveSink();
+    bot.answerCallbackQuery(query.id, { text: `✅ Retention set to ${days} days!` }).catch(() => {});
+    await purgeExpiredJobs(days);
+    return editOrSend(chatId, messageId,
+      formatExpiryUpdatedResponse(days),
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '📊 Bot Status', callback_data: 'admin_status' }],
+            [{ text: '🗑️ Edit Expiry Retention', callback_data: 'admin_menu_expiry' }],
+            [{ text: '🛠️ Admin Panel', callback_data: 'admin_main' }]
+          ]
+        }
+      }
+    );
+  }
+
+  if (data === 'exp_custom_prompt') {
+    adminState[fromId] = { action: 'set_custom_expiry' };
+    return editOrSend(chatId, messageId,
+      `✏️ Set Custom Database Expiry Retention\n\n` +
+      `Current Retention: ${settings.expiryDays} Days\n\n` +
+      `Please reply with the number of days jobs should be retained in the database before auto-cleanup.\n\n` +
+      `💡 Example:\n` +
+      `45\n` +
+      `or:\n` +
+      `90\n\n` +
+      `(Or tap Cancel below to abort)`,
+      getCancelMarkup('admin_menu_expiry')
+    );
+  }
+
+  if (data === 'exp_purge_now') {
+    delete adminState[fromId];
+    bot.answerCallbackQuery(query.id, { text: '🧹 Running cleanup...' }).catch(() => {});
+    const result = await purgeExpiredJobs();
+    const dbMsg = supabaseService.isConfigured()
+      ? `• Supabase purged: ${result.supabaseDeleted} jobs\n`
+      : '• Supabase: Not configured\n';
+    return editOrSend(chatId, messageId,
+      `✅ Database Cleanup Complete!\n\n` +
+      `• Retention Threshold: ${settings.expiryDays} days\n` +
+      `• Local DB purged: ${result.localDeleted} jobs\n` +
+      dbMsg +
+      `• Note: Telegram channel/group history is kept intact.`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '📊 Bot Status', callback_data: 'admin_status' }],
+            [{ text: '🗑️ Expiry Settings', callback_data: 'admin_menu_expiry' }],
+            [{ text: '🛠️ Admin Panel', callback_data: 'admin_main' }]
+          ]
+        }
+      }
+    );
+  }
+
   if (data === 'admin_status') {
     delete adminState[fromId];
     return sendStatus(chatId, true);
@@ -1296,6 +1447,36 @@ bot.onText(/^\/(?:maxage|setmaxage)(?:\s+(.+))?/i, (msg, m) => {
   });
 });
 
+bot.onText(/^\/(?:expiry|setexpiry|cleanupdays)(?:\s+(.+))?/i, async (msg, m) => {
+  if (!requireAdmin(msg)) return;
+  const raw = m && m[1] ? m[1].trim() : '';
+  if (!raw) {
+    const adminId = String(msg.from ? msg.from.id : msg.chat.id);
+    adminState[adminId] = { action: 'set_custom_expiry' };
+    return safeSend(msg.chat.id, formatExpiryMenuText(), {
+      reply_markup: getExpiryMenuMarkup()
+    });
+  }
+  const val = parseInt(raw, 10);
+  if (isNaN(val) || val < 1 || val > 1000) {
+    return safeSend(msg.chat.id, '⚠️ Invalid number of days. Please provide a number between 1 and 1000 (e.g. /setexpiry 60).', {
+      reply_markup: getExpiryMenuMarkup()
+    });
+  }
+  settings.expiryDays = val;
+  settings.saveSink();
+  await purgeExpiredJobs(val);
+  return safeSend(msg.chat.id, formatExpiryUpdatedResponse(val), {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '📊 Bot Status', callback_data: 'admin_status' }],
+        [{ text: '🗑️ Edit Expiry Retention', callback_data: 'admin_menu_expiry' }],
+        [{ text: '🛠️ Admin Panel', callback_data: 'admin_main' }]
+      ]
+    }
+  });
+});
+
 bot.onText(/^\/sinkmode(?:\s+(.+))?/i, (msg, m) => {
   if (!requireAdmin(msg)) return;
   const arg = m && m[1] ? m[1].trim().toLowerCase() : '';
@@ -1477,6 +1658,25 @@ bot.onText(/^\/removekeyword(?:\s+(.+))?/i, (msg, m) => {
   });
 });
 
+bot.onText(/^\/(?:cleanup|purge)(?:\s|$|@\w+)/i, async (msg) => {
+  if (!requireAdmin(msg)) return;
+  safeSend(msg.chat.id, '🧹 Running database cleanup for jobs older than 60 days (2 months)...').catch(() => {});
+  try {
+    const result = await purgeExpiredJobs(60);
+    const dbMsg = supabaseService.isConfigured()
+      ? `• Supabase purged: ${result.supabaseDeleted} jobs\n`
+      : '• Supabase: Not configured\n';
+    await safeSend(msg.chat.id,
+      `✅ Database Cleanup Complete!\n\n` +
+      `• Local DB purged: ${result.localDeleted} jobs\n` +
+      dbMsg +
+      `• Note: Telegram channel/group history is kept intact.`
+    );
+  } catch (err) {
+    await safeSend(msg.chat.id, `❌ Cleanup error: ${err.message}`);
+  }
+});
+
 bot.onText(/^\/status(?:\s|$|@\w+)/i, async (msg) => {
   if (!isPrivate(msg)) {
     return deliverToUserOrRedirect(msg, 'status', id => sendStatus(id, isAdmin(msg)));
@@ -1505,7 +1705,7 @@ bot.onText(/^\/addchannel(?:\s+(.+))?/i, (msg, m) => {
     );
   }
 
-  const u = raw.replace(/^@/, '').trim();
+  const u = settings.sanitizeChannel(raw);
   const channels = settings.getChannels();
   const totalBefore = channels.length;
   if (!channels.includes(u)) {
@@ -1536,7 +1736,7 @@ bot.onText(/^\/removechannel(?:\s+(.+))?/i, (msg, m) => {
     );
   }
 
-  const u = raw.replace(/^@/, '').trim();
+  const u = settings.sanitizeChannel(raw);
   let channels = settings.getChannels();
   const totalBefore = channels.length;
   if (channels.includes(u)) {
@@ -1661,3 +1861,4 @@ module.exports = {
   sendRecent,
   sendChannels
 };
+

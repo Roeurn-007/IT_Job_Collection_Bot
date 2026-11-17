@@ -1,4 +1,5 @@
 const { SEEN_FILE, readJson, writeJson } = require('../config/settings');
+const supabaseService = require('./supabaseService');
 
 // Initialize seen Set from persistent storage
 const seenSet = new Set(readJson(SEEN_FILE, []));
@@ -12,6 +13,10 @@ function markSeen(key) {
   if (!key) return;
   seenSet.add(String(key));
   saveSeen();
+
+  if (supabaseService.isConfigured()) {
+    supabaseService.markSeenInSupabase(key).catch(() => {});
+  }
 }
 
 function saveSeen() {

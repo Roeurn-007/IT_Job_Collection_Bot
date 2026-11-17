@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: it-job-collection-bot
+    runtime: node
+    plan: free
+    region: singapore # Closest low-latency region to Cambodia / SE Asia
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false # Set in Render Dashboard
+      - key: ADMIN_CHAT_ID
+        sync: false # Set in Render Dashboard
+      - key: SINK_CHAT_ID
+        sync: false # Set in Render Dashboard
+      - key: MAX_AGE_DAYS
+        value: "30"
+      - key: SCRAPE_INTERVAL_SECONDS
+        value: "90"
+      - key: EXPIRY_DAYS
+        value: "60"
+      - key: SUPABASE_URL
+        sync: false # Optional: Set in Render Dashboard
+      - key: SUPABASE_KEY
+        sync: false # Optional: Set in Render Dashboard
