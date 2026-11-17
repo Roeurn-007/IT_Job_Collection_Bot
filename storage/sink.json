@@ -1,10 +1,10 @@
 {
   "sinkMode": "group",
   "groupSinks": [
-    "-1004469567529"
+    "-100xxxxxxxxxx"
   ],
-  "groupSink": "-1004469567529",
-  "adminSink": "7339961364",
+  "groupSink": "-100xxxxxxxxxx",
+  "adminSink": "your_telegram_user_id",
   "maxAgeDays": 30,
   "expiryDays": 60
 }
