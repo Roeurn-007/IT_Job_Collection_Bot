@@ -677,7 +677,7 @@ bot.on('message', async (msg) => {
     const val = text.trim();
     delete adminState[adminId];
     if (!val) {
-      return safeSend(msg.chat.id, '⚠️ Please send a valid Chat ID (e.g. -1004469567529).', {
+      return safeSend(msg.chat.id, '⚠️ Please send a valid Chat ID (e.g. -1001234567890).', {
         reply_markup: getCancelMarkup('admin_menu_sink')
       });
     }
@@ -991,7 +991,7 @@ bot.on('callback_query', async (query) => {
       `➕ Add Group Destination Sink\n\n` +
       `Please send the Telegram Group Chat ID to add.\n\n` +
       `💡 Example:\n` +
-      `-1004469567529\n\n` +
+      `-1001234567890\n\n` +
       `💡 Tip: You can also use /addsink here while in the group to add it automatically.\n\n` +
       `(Or tap Cancel below to abort)`,
       getCancelMarkup('admin_menu_sink')
@@ -1273,7 +1273,8 @@ bot.on('message', (msg) => {
   }
 
   // Never attempt to delete messages sent by the bot itself
-  if (msg.from && msg.from.is_bot && (msg.from.id === 9186503282 || msg.from.username === 'facescan_roeurn_bot')) {
+  const currentBotId = settings.TELEGRAM_BOT_TOKEN ? parseInt(settings.TELEGRAM_BOT_TOKEN.split(':')[0], 10) : null;
+  if (msg.from && msg.from.is_bot && (currentBotId ? msg.from.id === currentBotId : true)) {
     return;
   }
 
@@ -1516,7 +1517,7 @@ bot.onText(/^\/addsink(?:\s+(.+))?/i, (msg, m) => {
         `➕ Add Group Destination Sink\n\n` +
         `Please send the Telegram Group Chat ID to add as a destination sink.\n\n` +
         `💡 Example:\n` +
-        `-1004469567529\n\n` +
+        `-1001234567890\n\n` +
         `💡 Or use /addsink in the target group.\n\n` +
         `(Or tap Cancel below to abort)`,
         getCancelMarkup('admin_menu_sink')

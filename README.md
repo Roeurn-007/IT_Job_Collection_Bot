@@ -133,9 +133,9 @@ cp .env.example .env
 Open `.env` and fill in your credentials:
 ```env
 # Telegram Bot Configuration
-TELEGRAM_BOT_TOKEN=1234567890:ABCdefGhIJKlmNoPQRsTUVwxyZ
-ADMIN_CHAT_ID=7339961364
-SINK_CHAT_ID=-1004469567529
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+ADMIN_CHAT_ID=your_telegram_user_id
+SINK_CHAT_ID=-100xxxxxxxxxx
 
 # Scraper & Expiration Settings
 MAX_AGE_DAYS=30

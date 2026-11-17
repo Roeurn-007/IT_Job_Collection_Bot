@@ -40,13 +40,13 @@ function writeJson(file, data) {
 // Environment settings
 const PORT = process.env.PORT || 3000;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
-const ADMIN_IDS = (process.env.ADMIN_CHAT_ID || process.env.TELEGRAM_CHAT_ID || '7339961364')
+const ADMIN_IDS = (process.env.ADMIN_CHAT_ID || process.env.TELEGRAM_CHAT_ID || '')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);
 
-const DEFAULT_GROUP_SINK = process.env.SINK_CHAT_ID || '-1004469567529';
-const DEFAULT_ADMIN_SINK = ADMIN_IDS[0] || '7339961364';
+const DEFAULT_GROUP_SINK = process.env.SINK_CHAT_ID || '';
+const DEFAULT_ADMIN_SINK = ADMIN_IDS[0] || '';
 
 // File paths
 const CHANNELS_FILE = path.join(CONFIG_DIR, 'channels.json');
