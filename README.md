@@ -228,6 +228,9 @@ Deploying this bot to [Render](https://render.com) takes under 3 minutes.
 | :--- | :--- | :--- |
 | `/admin` | — | Open the interactive Telegram Admin Control Panel with button menus. |
 | `/status` | — | Display bot diagnostic metrics, Supabase status, channel count, and retention settings. |
+| `/groupchat` | `[on\|off]` | View or toggle normal member group chat permission (open / restricted). |
+| `/allowchat` | — | Allow normal members to chat freely in the group (disables auto-deletion). |
+| `/blockchat` | — | Restrict group to jobs only (enables auto-deletion of non-admin chat). |
 | `/expiry` | — | View current database expiration retention window. |
 | `/setexpiry` | `<days>` | Set custom expiration retention (e.g. `/setexpiry 60`, `/setexpiry 90`). |
 | `/cleanup` | `[days]` | Manually trigger purge of expired jobs from DB and Web Dashboard. |
@@ -269,9 +272,19 @@ The bot features a 2-month (60-day) data retention cycle designed to keep your d
 
 ---
 
-## 🛡️ Group Auto-Moderation & BotFather Setup
+## 🛡️ Group Auto-Moderation & Chat Permission Toggle
 
-To maintain a clean, professional job board in your Telegram supergroup, the bot automatically removes non-admin chatter and spam.
+The bot includes an intelligent group moderation engine to keep your job broadcast channels clean, while giving administrators full control over whether normal members can chat.
+
+### Moderation Modes:
+- **🔒 Restricted Mode (Default)**:
+  Non-admin messages, photos, files, and stickers sent in the group are immediately deleted. The bot responds with a polite 15-second redirect notice and inline button linking to the bot DM, then auto-cleans the notice.
+- **🔓 Allowed Mode (Open Chat)**:
+  Non-admin members can chat, discuss, and send text freely in the group. The bot will NOT auto-remove their messages.
+
+### How to Toggle Group Chat:
+- **Via Admin Control Panel**: Send `/admin` > Click **"💬 Chat: 🔒 Restricted"** (or **"💬 Chat: 🔓 Open"**) > Select mode.
+- **Via Direct Commands**: Send `/allowchat` to open chat, or `/blockchat` to restrict it to jobs only.
 
 ### BotFather Setup (Required for Group Moderation)
 1. Open [@BotFather](https://t.me/BotFather) in Telegram.
@@ -307,6 +320,8 @@ Test coverage includes:
 - [x] 60-day retention cleanup logic (older jobs purged, fresh jobs preserved).
 - [x] Live Supabase CRUD and graceful local storage fallback.
 - [x] In-memory Web Dashboard Express routes (`/api/health`, `/api/status`, `/api/collected`, `/api/cleanup`).
+- [x] Group Auto-Moderation & 15-second redirect notice with inline button.
+- [x] Admin group chat permission toggle (Allow / Restrict) with persistent storage in `sink.json`.
 
 ---
 

@@ -23,6 +23,8 @@ services:
         value: "90"
       - key: EXPIRY_DAYS
         value: "60"
+      - key: ALLOW_USER_CHAT
+        value: "false"
       - key: SUPABASE_URL
         sync: false # Optional: Set in Render Dashboard
       - key: SUPABASE_KEY
