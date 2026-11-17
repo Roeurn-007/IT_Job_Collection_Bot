@@ -937,7 +937,7 @@ bot.on('callback_query', async (query) => {
     const channels = settings.getChannels();
     return editOrSend(chatId, messageId,
       `⚡ Live Channel Scrape Initiated!\n\n` +
-      `📡 Scanning all ${channels.length} channels in parallel batches of 6...\n` +
+      `📡 Scanning all ${channels.length} channels in batches of 4...\n` +
       `Any jobs published today will appear in your destination sink.`,
       {
         reply_markup: {
@@ -1221,7 +1221,7 @@ bot.on('callback_query', async (query) => {
     const channels = settings.getChannels();
     return safeSend(chatId,
       `⚡ Live Channel Scrape Initiated!\n\n` +
-      `📡 Scanning all ${channels.length} channels in parallel batches of 6...\n` +
+      `📡 Scanning all ${channels.length} channels in batches of 4...\n` +
       `Any jobs published today will appear in your destination sink.`,
       {
         reply_markup: {

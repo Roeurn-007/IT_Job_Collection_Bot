@@ -217,8 +217,7 @@ async function scrapeChannel(username) {
 // 3. Automated parallel multi-channel polling with batch delays and overlap protection
 async function pollChannels() {
   if (isPolling) {
-    logger.warn('Previous scraping cycle is still in progress. Skipping to prevent overlap.');
-    return { ok: false, message: 'Scrape already in progress' };
+    return { ok: true, alreadyRunning: true, message: 'Scrape already in progress' };
   }
   isPolling = true;
 
@@ -267,5 +266,6 @@ module.exports = {
   handleIncoming,
   scrapeChannel,
   pollChannels,
-  startScraper
+  startScraper,
+  isScrapingActive: () => isPolling
 };
