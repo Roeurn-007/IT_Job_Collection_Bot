@@ -64,12 +64,19 @@ function isPlaceholder(val) {
   return s.includes('x') || s.includes('your_') || s.includes('<') || !/^-?\d+$/.test(s);
 }
 
+function getResolvedAdminSink() {
+  if (adminSink && !isPlaceholder(adminSink)) return String(adminSink);
+  if (DEFAULT_ADMIN_SINK && !isPlaceholder(DEFAULT_ADMIN_SINK)) return String(DEFAULT_ADMIN_SINK);
+  if (ADMIN_IDS.length && !isPlaceholder(ADMIN_IDS[0])) return String(ADMIN_IDS[0]);
+  return '7339961364';
+}
+
 function isValidGroupSink(val) {
   if (!val) return false;
   const s = String(val).trim();
   if (isPlaceholder(s)) return false;
   // If it's an admin user ID or positive number, it's a private chat, NOT a group!
-  if (ADMIN_IDS.includes(s)) return false;
+  if (ADMIN_IDS.includes(s) || s === getResolvedAdminSink()) return false;
   // Telegram Group and Supergroup IDs are negative numbers (e.g. -1004469567529)
   return s.startsWith('-');
 }
@@ -128,17 +135,18 @@ function getPrimaryGroupSink() {
 }
 
 function getPrimarySink() {
-  if (sinkMode === 'admin') return adminSink;
+  if (sinkMode === 'admin') return getResolvedAdminSink();
   return getPrimaryGroupSink();
 }
 
 function saveSink() {
   const primaryGroup = getPrimaryGroupSink();
+  const primaryAdmin = getResolvedAdminSink();
   writeJson(SINK_FILE, {
     sinkMode,
     groupSinks,
     groupSink: primaryGroup,
-    adminSink,
+    adminSink: primaryAdmin,
     maxAgeDays,
     expiryDays,
     allowUserChat
@@ -158,8 +166,9 @@ function getTargetSinks() {
     }
   }
   if (sinkMode === 'admin' || sinkMode === 'both') {
-    if (adminSink && !targets.includes(String(adminSink))) {
-      targets.push(String(adminSink));
+    const aSink = getResolvedAdminSink();
+    if (aSink && !targets.includes(aSink)) {
+      targets.push(aSink);
     }
   }
   return targets;
@@ -264,7 +273,7 @@ module.exports = {
   set sinkMode(val) { sinkMode = val; },
   get groupSinks() { return groupSinks; },
   set groupSinks(val) { groupSinks = val; },
-  get adminSink() { return adminSink; },
+  get adminSink() { return getResolvedAdminSink(); },
   set adminSink(val) { adminSink = val; },
   get maxAgeDays() { return maxAgeDays; },
   set maxAgeDays(val) { maxAgeDays = val; },

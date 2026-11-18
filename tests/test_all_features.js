@@ -298,7 +298,7 @@ async function testFullSuite() {
   // -----------------------------------------------------------------
   console.log('STEP 8: Destination Sink Validation & Forwarding Modes Audit');
   const { isValidGroupSink } = require('../src/config/settings');
-  const { forwardJob } = require('../src/bot/services/forwardService');
+  const { forwardJob, forwardRecentJobsToGroups } = require('../src/bot/services/forwardService');
 
   // 8.1 Validation of group sink IDs
   assert.strictEqual(isValidGroupSink('-1004469567529'), true, '-100 supergroup ID must be valid');
@@ -325,12 +325,15 @@ async function testFullSuite() {
 
     settings.sinkMode = 'admin';
     const adminTargets = settings.getTargetSinks();
-    assert(adminTargets.includes(settings.adminSink), 'Admin mode must target admin private chat');
-    console.log('  • Mode "admin": Targets admin private chat ✅');
+    assert.strictEqual(adminTargets.length, 1, 'Admin mode must have exactly 1 target (bot chat)');
+    assert.strictEqual(adminTargets[0], settings.adminSink, 'Admin mode must target admin private chat');
+    console.log(`  • Mode "admin": Exclusively targets admin bot chat (${settings.adminSink}) ✅`);
 
     settings.sinkMode = 'both';
     const bothTargets = settings.getTargetSinks();
     assert(bothTargets.length >= 2, 'Both mode must target both group and admin');
+    assert(bothTargets.includes('-1004469567529'), 'Both mode must include group -1004469567529');
+    assert(bothTargets.includes(settings.adminSink), 'Both mode must include admin bot chat');
     console.log('  • Mode "both": Targets both group and admin simultaneously ✅');
   } finally {
     settings.sinkMode = originalMode;
@@ -338,48 +341,89 @@ async function testFullSuite() {
   }
 
   // 8.4 Verify live forwarding dispatch logic (mocked)
-  let dispatchedTarget = null;
-  let dispatchedContent = null;
-  let dispatchedPhotoTarget = null;
+  let dispatchedTargets = [];
+  let dispatchedPhotos = [];
   const originalSafeSend = bot.sendMessage;
   const originalSendPhoto = bot.sendPhoto;
 
   bot.sendMessage = async (target, content) => {
-    dispatchedTarget = String(target);
-    dispatchedContent = content;
+    dispatchedTargets.push({ target: String(target), content });
     return { message_id: 12345 };
   };
   bot.sendPhoto = async (target, photo, opts) => {
-    dispatchedPhotoTarget = String(target);
+    dispatchedPhotos.push({ target: String(target), photo });
     return { message_id: 12346 };
   };
 
-  try {
-    settings.sinkMode = 'group';
-    const testJobText = {
-      id: 'test_fwd_1',
-      source: '@camhrjobs',
-      messageId: 5555,
-      text: 'We are hiring a Senior React Developer ($2500). Requirements: React, TypeScript.',
-      date: new Date().toISOString()
-    };
-    await forwardJob(testJobText);
-    assert(dispatchedTarget.startsWith('-'), 'Forwarded job MUST be sent to group ID, never user ID');
-    assert(dispatchedContent.includes('React Developer'), 'Forwarded card must include job description');
-    assert(dispatchedContent.includes('@camhrjobs'), 'Forwarded card must include source channel');
-    console.log(`  • Forwarding service correctly dispatches text jobs to group target: ${dispatchedTarget} ✅`);
+  const sampleTestJob = {
+    id: 'test_fwd_dispatch_sample',
+    source: '@camhrjobs',
+    messageId: 5555,
+    text: 'We are hiring a Senior React Developer ($2500). Requirements: React, TypeScript.',
+    date: new Date().toISOString()
+  };
 
-    const testJobPhoto = {
-      id: 'test_fwd_2',
-      source: '@camhrjobs',
-      messageId: 5556,
-      text: 'Senior DevOps Engineer ($3000)',
-      date: new Date().toISOString(),
-      photo: { file_id: 'test_photo_id' }
-    };
-    await forwardJob(testJobPhoto);
-    assert(dispatchedPhotoTarget.startsWith('-'), 'Forwarded photo job MUST be sent to group ID');
-    console.log(`  • Forwarding service correctly dispatches photo jobs to group target: ${dispatchedPhotoTarget} ✅`);
+  try {
+    // Mode: group
+    settings.sinkMode = 'group';
+    dispatchedTargets = [];
+    await forwardJob(sampleTestJob);
+    assert(dispatchedTargets.every(d => d.target.startsWith('-')), 'Group mode forwardJob must ONLY send to group ID');
+    assert(dispatchedTargets.some(d => d.target === '-1004469567529'), 'Must send to group -1004469567529');
+    console.log('  • forwardJob in "group" mode: Delivered to group sink only ✅');
+
+    // Mode: admin (Bot Chat Only)
+    settings.sinkMode = 'admin';
+    dispatchedTargets = [];
+    await forwardJob(sampleTestJob);
+    assert.strictEqual(dispatchedTargets.length, 1, 'Admin mode must send to exactly 1 target');
+    assert.strictEqual(dispatchedTargets[0].target, settings.adminSink, 'Admin mode MUST send to bot chat (admin ID), NEVER group');
+    console.log(`  • forwardJob in "admin" mode: Delivered strictly to Bot Chat (${settings.adminSink}) ✅`);
+
+    // Mode: both
+    settings.sinkMode = 'both';
+    dispatchedTargets = [];
+    await forwardJob(sampleTestJob);
+    const sentTargets = dispatchedTargets.map(d => d.target);
+    assert(sentTargets.includes('-1004469567529'), 'Both mode must deliver to group');
+    assert(sentTargets.includes(settings.adminSink), 'Both mode must deliver to admin bot chat');
+    console.log('  • forwardJob in "both" mode: Delivered to group AND bot chat ✅');
+
+    // 8.5 Verify forwardRecentJobsToGroups in all 3 modes!
+    // Add sample job to storage so forwardRecentJobsToGroups has jobs to push
+    storageService.addJob(sampleTestJob);
+
+    // Test forwardRecentJobsToGroups in "admin" mode
+    settings.sinkMode = 'admin';
+    dispatchedTargets = [];
+    await forwardRecentJobsToGroups(settings.adminSink, 1);
+    // There should be: starting message to admin, job card to admin, summary to admin
+    const jobCardsSent = dispatchedTargets.filter(d => d.content && d.content.includes('React Developer'));
+    assert.strictEqual(jobCardsSent.length, 1, 'Must send 1 job card');
+    assert.strictEqual(jobCardsSent[0].target, settings.adminSink, 'Job card in admin mode MUST be sent to bot chat (admin ID), NEVER group');
+    console.log('  • forwardRecentJobsToGroups in "admin" mode: Job delivered to Bot Chat only ✅');
+
+    // Test forwardRecentJobsToGroups in "both" mode
+    settings.sinkMode = 'both';
+    dispatchedTargets = [];
+    await forwardRecentJobsToGroups(settings.adminSink, 1);
+    const jobCardsBoth = dispatchedTargets.filter(d => d.content && d.content.includes('React Developer'));
+    const destinationsBoth = jobCardsBoth.map(d => d.target);
+    assert(destinationsBoth.includes('-1004469567529'), 'Both mode must deliver job card to group');
+    assert(destinationsBoth.includes(settings.adminSink), 'Both mode must deliver job card to bot chat');
+    console.log('  • forwardRecentJobsToGroups in "both" mode: Job delivered to Group AND Bot Chat ✅');
+
+    // Test forwardRecentJobsToGroups in "group" mode
+    settings.sinkMode = 'group';
+    dispatchedTargets = [];
+    await forwardRecentJobsToGroups(settings.adminSink, 1);
+    const jobCardsGroup = dispatchedTargets.filter(d => d.content && d.content.includes('React Developer'));
+    assert(jobCardsGroup.every(d => d.target.startsWith('-')), 'Group mode must deliver job card ONLY to group');
+    console.log('  • forwardRecentJobsToGroups in "group" mode: Job delivered to Group only ✅');
+
+    // Clean up sample job
+    storageService.collected = storageService.collected.filter(j => j.id !== sampleTestJob.id);
+    storageService.saveCollected();
   } finally {
     bot.sendMessage = originalSafeSend;
     bot.sendPhoto = originalSendPhoto;

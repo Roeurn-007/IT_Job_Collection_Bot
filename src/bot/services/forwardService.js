@@ -45,9 +45,9 @@ async function forwardRecentJobsToGroups(adminChatId, count = 15) {
     return safeSend(adminChatId, '⚠️ No collected IT jobs available in database to forward.');
   }
 
-  const groupTargets = settings.groupSinks;
-  if (!groupTargets.length) {
-    return safeSend(adminChatId, '⚠️ No group destination sinks configured. Please add a sink first via /addsink.');
+  const targets = settings.getTargetSinks();
+  if (!targets.length) {
+    return safeSend(adminChatId, '⚠️ No destination sinks configured. Please configure sinks via /sink.');
   }
 
   const todayStr = getPhnomPenhDateStr(new Date());
@@ -61,11 +61,23 @@ async function forwardRecentJobsToGroups(adminChatId, count = 15) {
   const jobsToForward = sorted.slice(0, count);
   const actualCount = jobsToForward.length;
 
-  await safeSend(adminChatId, `🚀 Starting push of ${actualCount} IT jobs to ${groupTargets.length} group sink(s)...`);
+  let modeDesc = 'destination sink(s)';
+  if (settings.sinkMode === 'admin') {
+    modeDesc = `Bot Chat (Admin DM: ${settings.adminSink})`;
+  } else if (settings.sinkMode === 'both') {
+    modeDesc = `Both Group(s) and Bot Chat (${targets.length} destinations)`;
+  } else {
+    modeDesc = `${targets.length} group sink(s)`;
+  }
+
+  await safeSend(adminChatId, `🚀 Starting push of ${actualCount} IT jobs to ${modeDesc}...`);
 
   let totalDelivered = 0;
-  for (const targetId of groupTargets) {
+  const deliveredLabels = [];
+  for (const targetId of targets) {
     let sentCount = 0;
+    const isBot = targetId === String(settings.adminSink);
+    const destLabel = isBot ? `🤖 Bot Chat: ${targetId}` : `👥 Group Sink: ${targetId}`;
     for (const job of jobsToForward) {
       const content = formatJobCard(job);
       try {
@@ -83,17 +95,21 @@ async function forwardRecentJobsToGroups(adminChatId, count = 15) {
       // Small pause to prevent hitting Telegram rate limits
       await new Promise(r => setTimeout(r, 150));
     }
-    if (sentCount > 0) totalDelivered++;
+    if (sentCount > 0) {
+      totalDelivered++;
+      deliveredLabels.push(destLabel);
+    }
   }
 
   const now = formatPhnomPenhDate(new Date()).display;
   return safeSend(adminChatId,
     `✅ Successfully Forwarded ${actualCount} IT Jobs!\n\n` +
     `📦 Total Jobs Sent: ${actualCount}\n` +
-    `👥 Delivered to Groups (${totalDelivered}/${groupTargets.length}):\n` +
-    groupTargets.map((g, idx) => `  ${idx + 1}. ${g}`).join('\n') + `\n` +
+    `🎯 Forwarding Mode: ${settings.sinkMode.toUpperCase()}\n` +
+    `📍 Delivered Destinations (${totalDelivered}/${targets.length}):\n` +
+    deliveredLabels.map((g, idx) => `  ${idx + 1}. ${g}`).join('\n') + `\n` +
     `🕒 Completed: ${now}\n\n` +
-    `All ${actualCount} jobs are now live in your group(s)!`,
+    `All ${actualCount} jobs are now live in your configured destination(s)!`,
     {
       reply_markup: {
         inline_keyboard: [

@@ -39,6 +39,12 @@ const adminState = {};
 
 function getAdminControlPanelMarkup() {
   const chatLabel = settings.allowUserChat ? '💬 Chat: 🔓 Open' : '💬 Chat: 🔒 Restricted';
+  let forwardLabel = '🚀 Forward Jobs to Group';
+  if (settings.sinkMode === 'admin') {
+    forwardLabel = '🚀 Forward Jobs to Bot Chat';
+  } else if (settings.sinkMode === 'both') {
+    forwardLabel = '🚀 Forward Jobs (Group + Bot)';
+  }
   return {
     inline_keyboard: [
       [
@@ -54,7 +60,7 @@ function getAdminControlPanelMarkup() {
         { text: chatLabel, callback_data: 'admin_menu_chat' }
       ],
       [
-        { text: '🚀 Forward Jobs to Group', callback_data: 'admin_forward_prompt' },
+        { text: forwardLabel, callback_data: 'admin_forward_prompt' },
         { text: '📊 Bot Status', callback_data: 'admin_status' }
       ],
       [
@@ -447,13 +453,23 @@ function formatForwardPromptText() {
   const todayStr = getPhnomPenhDateStr(new Date());
   const todayCount = collected.filter(c => getPhnomPenhDateStr(c.date) === todayStr).length;
 
+  let destText = '';
+  if (settings.sinkMode === 'admin') {
+    destText = `🤖 Destination: Bot Chat (Admin DM: ${settings.adminSink})`;
+  } else if (settings.sinkMode === 'both') {
+    destText = `🔄 Destination: Both Group(s) (${settings.groupSinks.join(', ')}) & Bot Chat (${settings.adminSink})`;
+  } else {
+    destText = `👥 Target Group Sinks (${settings.groupSinks.length}):\n` +
+      settings.groupSinks.map((s, i) => `  ${i + 1}. ${s}`).join('\n');
+  }
+
   return (
-    `🚀 Forward Jobs to Group Sinks\n\n` +
+    `🚀 Forward Jobs to Active Sinks\n\n` +
     `📦 Total Collected Jobs: ${collected.length}\n` +
     `🔥 Jobs Published Today: ${todayCount}\n` +
-    `👥 Target Group Sinks (${settings.groupSinks.length}):\n` +
-    settings.groupSinks.map((s, i) => `  ${i + 1}. ${s}`).join('\n') + `\n\n` +
-    `💡 Select how many jobs you would like to pull and forward to your group(s), or reply directly with any custom number (1 - 50):`
+    `📌 Active Forwarding Mode: ${settings.sinkMode.toUpperCase()}\n` +
+    `${destText}\n\n` +
+    `💡 Select how many jobs you would like to pull and forward, or reply directly with any custom number (1 - 50):`
   );
 }
 
@@ -1319,13 +1335,15 @@ bot.on('callback_query', async (query) => {
   if (data && data.startsWith('fwd_count_')) {
     delete adminState[fromId];
     const count = parseInt(data.replace('fwd_count_', ''), 10) || 15;
-    bot.answerCallbackQuery(query.id, { text: `🚀 Forwarding ${count} jobs to group(s)...` }).catch(() => {});
+    const destName = settings.sinkMode === 'admin' ? 'Bot Chat' : (settings.sinkMode === 'both' ? 'Groups & Bot Chat' : 'group(s)');
+    bot.answerCallbackQuery(query.id, { text: `🚀 Forwarding ${count} jobs to ${destName}...` }).catch(() => {});
     return forwardRecentJobsToGroups(chatId, count);
   }
 
   if (data === 'admin_forward_15') {
     delete adminState[fromId];
-    bot.answerCallbackQuery(query.id, { text: '🚀 Pulling 15 jobs and forwarding to group...' }).catch(() => {});
+    const destName = settings.sinkMode === 'admin' ? 'Bot Chat' : (settings.sinkMode === 'both' ? 'Groups & Bot Chat' : 'group(s)');
+    bot.answerCallbackQuery(query.id, { text: `🚀 Pulling 15 jobs and forwarding to ${destName}...` }).catch(() => {});
     return forwardRecentJobsToGroups(chatId, 15);
   }
 
