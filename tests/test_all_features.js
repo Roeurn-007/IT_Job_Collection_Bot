@@ -1,4 +1,6 @@
 const assert = require('assert');
+const path = require('path');
+const fs = require('fs');
 const http = require('http');
 const settings = require('../src/config/settings');
 const storageService = require('../src/services/storageService');
@@ -290,6 +292,143 @@ async function testFullSuite() {
   console.log('  • /api/status endpoint reports allowUserChat: false ✅');
 
   console.log('  ✅ Admin Group Chat Moderation Toggle 100% verified.\n');
+
+  // -----------------------------------------------------------------
+  // 8. DESTINATION SINK VALIDATION & MULTI-MODE FORWARDING AUDIT
+  // -----------------------------------------------------------------
+  console.log('STEP 8: Destination Sink Validation & Forwarding Modes Audit');
+  const { isValidGroupSink } = require('../src/config/settings');
+  const { forwardJob } = require('../src/bot/services/forwardService');
+
+  // 8.1 Validation of group sink IDs
+  assert.strictEqual(isValidGroupSink('-1004469567529'), true, '-100 supergroup ID must be valid');
+  assert.strictEqual(isValidGroupSink('-1009876543210'), true, '-100 supergroup ID must be valid');
+  assert.strictEqual(isValidGroupSink('7339961364'), false, 'Positive admin user ID must be rejected as group sink');
+  assert.strictEqual(isValidGroupSink('123456789'), false, 'Positive user ID must be rejected as group sink');
+  assert.strictEqual(isValidGroupSink('-100xxxxxxxxxx'), false, 'Placeholder ID must be rejected');
+  assert.strictEqual(isValidGroupSink(''), false, 'Empty string must be rejected');
+  console.log('  • Group Sink ID validator strictly protects against accidental user IDs ✅');
+
+  // 8.2 Primary group fallback
+  const primaryGroup = settings.getPrimaryGroupSink();
+  assert(primaryGroup.startsWith('-'), 'Primary group sink must start with minus sign (-)');
+  console.log(`  • Verified primary group sink target: ${primaryGroup} ✅`);
+
+  // 8.3 Verify getTargetSinks in all 3 modes
+  const originalMode = settings.sinkMode;
+  try {
+    settings.sinkMode = 'group';
+    const groupTargets = settings.getTargetSinks();
+    assert(groupTargets.every(id => id.startsWith('-')), 'Group mode must ONLY target negative group/channel IDs');
+    assert(groupTargets.includes('-1004469567529'), 'Must target managed group -1004469567529');
+    console.log('  • Mode "group": Exclusively targets real group sinks ✅');
+
+    settings.sinkMode = 'admin';
+    const adminTargets = settings.getTargetSinks();
+    assert(adminTargets.includes(settings.adminSink), 'Admin mode must target admin private chat');
+    console.log('  • Mode "admin": Targets admin private chat ✅');
+
+    settings.sinkMode = 'both';
+    const bothTargets = settings.getTargetSinks();
+    assert(bothTargets.length >= 2, 'Both mode must target both group and admin');
+    console.log('  • Mode "both": Targets both group and admin simultaneously ✅');
+  } finally {
+    settings.sinkMode = originalMode;
+    settings.saveSink();
+  }
+
+  // 8.4 Verify live forwarding dispatch logic (mocked)
+  let dispatchedTarget = null;
+  let dispatchedContent = null;
+  let dispatchedPhotoTarget = null;
+  const originalSafeSend = bot.sendMessage;
+  const originalSendPhoto = bot.sendPhoto;
+
+  bot.sendMessage = async (target, content) => {
+    dispatchedTarget = String(target);
+    dispatchedContent = content;
+    return { message_id: 12345 };
+  };
+  bot.sendPhoto = async (target, photo, opts) => {
+    dispatchedPhotoTarget = String(target);
+    return { message_id: 12346 };
+  };
+
+  try {
+    settings.sinkMode = 'group';
+    const testJobText = {
+      id: 'test_fwd_1',
+      source: '@camhrjobs',
+      messageId: 5555,
+      text: 'We are hiring a Senior React Developer ($2500). Requirements: React, TypeScript.',
+      date: new Date().toISOString()
+    };
+    await forwardJob(testJobText);
+    assert(dispatchedTarget.startsWith('-'), 'Forwarded job MUST be sent to group ID, never user ID');
+    assert(dispatchedContent.includes('React Developer'), 'Forwarded card must include job description');
+    assert(dispatchedContent.includes('@camhrjobs'), 'Forwarded card must include source channel');
+    console.log(`  • Forwarding service correctly dispatches text jobs to group target: ${dispatchedTarget} ✅`);
+
+    const testJobPhoto = {
+      id: 'test_fwd_2',
+      source: '@camhrjobs',
+      messageId: 5556,
+      text: 'Senior DevOps Engineer ($3000)',
+      date: new Date().toISOString(),
+      photo: { file_id: 'test_photo_id' }
+    };
+    await forwardJob(testJobPhoto);
+    assert(dispatchedPhotoTarget.startsWith('-'), 'Forwarded photo job MUST be sent to group ID');
+    console.log(`  • Forwarding service correctly dispatches photo jobs to group target: ${dispatchedPhotoTarget} ✅`);
+  } finally {
+    bot.sendMessage = originalSafeSend;
+    bot.sendPhoto = originalSendPhoto;
+    settings.sinkMode = originalMode;
+    settings.saveSink();
+  }
+  console.log('  ✅ Destination Sink Validation & Forwarding Audit 100% verified.\n');
+
+  // -----------------------------------------------------------------
+  // 9. IT KEYWORD FILTERING & SANITIZATION ENGINE
+  // -----------------------------------------------------------------
+  console.log('STEP 9: IT Keyword Filtering & Anti-Spam Intelligence');
+  const { isJobPost, getMatchedKeywords } = require('../src/services/jobFilter');
+
+  // Real IT jobs
+  const itJob1 = 'We are hiring: Senior Fullstack Developer (Node.js + Vue.js). Salary: $2000-$3500/month. Location: Phnom Penh.';
+  const itJob2 = 'Urgent Recruitment: IT Support Specialist & Network Engineer needed at ABA Bank. Apply now!';
+  assert.strictEqual(isJobPost(itJob1), true, 'Must detect IT job post');
+  assert.strictEqual(isJobPost(itJob2), true, 'Must detect IT job post');
+  const matched1 = getMatchedKeywords(itJob1);
+  assert(matched1.length > 0, 'Must extract matched technical keywords');
+  console.log(`  • IT Job Detection verified -> Matched keywords: [${matched1.join(', ')}] ✅`);
+
+  // Non-IT jobs
+  const nonItJob = 'Job Vacancy: Looking for Waiter & Cashier for coffee shop in BKK1. Apply today.';
+  assert.strictEqual(isJobPost(nonItJob), false, 'Must reject non-IT job');
+  console.log('  • Non-IT job correctly filtered out ✅');
+
+  // Spam / Contests with keywords in URL
+  const spamPost = 'React to this post to win a lucky draw prize! Visit https://example.com/flutter_giveaway';
+  assert.strictEqual(isJobPost(spamPost), false, 'Must reject spam / giveaway posts');
+  console.log('  • Contest / giveaway post correctly filtered out ✅');
+  console.log('  ✅ IT Keyword Filtering & Sanitization 100% verified.\n');
+
+  // -----------------------------------------------------------------
+  // 10. RENDER PRODUCTION BLUEPRINT & DEPLOYMENT HEALTH AUDIT
+  // -----------------------------------------------------------------
+  console.log('STEP 10: Render Cloud Deployment & Blueprint Audit');
+  const renderYamlPath = path.join(__dirname, '../render.yaml');
+  assert(fs.existsSync(renderYamlPath), 'render.yaml must exist in root');
+  const renderYamlContent = fs.readFileSync(renderYamlPath, 'utf8');
+  assert(renderYamlContent.includes('type: web'), 'render.yaml must define web service');
+  assert(renderYamlContent.includes('plan: free'), 'render.yaml must specify free tier');
+  assert(renderYamlContent.includes('region: singapore'), 'render.yaml must use low-latency singapore region');
+  assert(renderYamlContent.includes('healthCheckPath: /api/health'), 'render.yaml must configure health check path');
+  assert(renderYamlContent.includes('TELEGRAM_BOT_TOKEN'), 'render.yaml must declare TELEGRAM_BOT_TOKEN');
+  assert(renderYamlContent.includes('SINK_CHAT_ID'), 'render.yaml must declare SINK_CHAT_ID');
+  console.log('  • render.yaml validated: Singapore Web Service with /api/health check ✅');
+  console.log('  ✅ Render Cloud Infrastructure-as-Code 100% verified.\n');
 
   console.log('===============================================================');
   console.log('🎉 ALL SYSTEMS VERIFIED! PRODUCTION READY WITH 0 ERRORS');
