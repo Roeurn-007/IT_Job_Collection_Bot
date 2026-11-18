@@ -56,10 +56,22 @@ const COLLECTED_FILE = path.join(STORAGE_DIR, 'collected.json');
 const SEEN_FILE = path.join(STORAGE_DIR, 'seen.json');
 const SOURCES_FILE = path.join(STORAGE_DIR, 'sources.json');
 
+const KNOWN_DEFAULT_GROUP = '-1004469567529';
+
 function isPlaceholder(val) {
   if (!val) return true;
   const s = String(val).trim();
   return s.includes('x') || s.includes('your_') || s.includes('<') || !/^-?\d+$/.test(s);
+}
+
+function isValidGroupSink(val) {
+  if (!val) return false;
+  const s = String(val).trim();
+  if (isPlaceholder(s)) return false;
+  // If it's an admin user ID or positive number, it's a private chat, NOT a group!
+  if (ADMIN_IDS.includes(s)) return false;
+  // Telegram Group and Supergroup IDs are negative numbers (e.g. -1004469567529)
+  return s.startsWith('-');
 }
 
 // Sink Configuration
@@ -71,12 +83,12 @@ let maxAgeDays = parseInt(process.env.MAX_AGE_DAYS || '30', 10);
 let expiryDays = parseInt(process.env.EXPIRY_DAYS || '60', 10);
 let allowUserChat = process.env.ALLOW_USER_CHAT === 'true'; // false = normal messages blocked in group, true = allowed
 
-if (typeof rawSinkConfig === 'string' && !isPlaceholder(rawSinkConfig)) {
+if (typeof rawSinkConfig === 'string' && isValidGroupSink(rawSinkConfig)) {
   groupSinks = [rawSinkConfig];
 } else if (rawSinkConfig && typeof rawSinkConfig === 'object') {
   if (Array.isArray(rawSinkConfig.groupSinks)) {
-    groupSinks = rawSinkConfig.groupSinks.map(String).filter(s => !isPlaceholder(s));
-  } else if (rawSinkConfig.groupSink && !isPlaceholder(rawSinkConfig.groupSink)) {
+    groupSinks = rawSinkConfig.groupSinks.map(String).filter(s => isValidGroupSink(s));
+  } else if (rawSinkConfig.groupSink && isValidGroupSink(rawSinkConfig.groupSink)) {
     groupSinks = [String(rawSinkConfig.groupSink)];
   }
   if (rawSinkConfig.adminSink && !isPlaceholder(rawSinkConfig.adminSink)) {
@@ -96,16 +108,23 @@ if (typeof rawSinkConfig === 'string' && !isPlaceholder(rawSinkConfig)) {
   }
 }
 
-// Always fallback to .env configuration if sink or admin IDs are missing or placeholders
-if (!groupSinks.length && DEFAULT_GROUP_SINK && !isPlaceholder(DEFAULT_GROUP_SINK)) {
-  groupSinks = [DEFAULT_GROUP_SINK];
+// Always fallback to valid group configuration
+if (!groupSinks.length) {
+  if (DEFAULT_GROUP_SINK && isValidGroupSink(DEFAULT_GROUP_SINK)) {
+    groupSinks = [DEFAULT_GROUP_SINK];
+  } else {
+    groupSinks = [KNOWN_DEFAULT_GROUP];
+  }
 }
 if (!adminSink && DEFAULT_ADMIN_SINK && !isPlaceholder(DEFAULT_ADMIN_SINK)) {
   adminSink = DEFAULT_ADMIN_SINK;
 }
 
 function getPrimaryGroupSink() {
-  return groupSinks[0] || DEFAULT_GROUP_SINK;
+  const valid = groupSinks.find(s => isValidGroupSink(s));
+  if (valid) return valid;
+  if (DEFAULT_GROUP_SINK && isValidGroupSink(DEFAULT_GROUP_SINK)) return DEFAULT_GROUP_SINK;
+  return KNOWN_DEFAULT_GROUP;
 }
 
 function getPrimarySink() {
@@ -131,7 +150,11 @@ function getTargetSinks() {
   if (sinkMode === 'group' || sinkMode === 'both') {
     for (const g of groupSinks) {
       const s = String(g).trim();
-      if (s && !targets.includes(s)) targets.push(s);
+      if (isValidGroupSink(s) && !targets.includes(s)) targets.push(s);
+    }
+    // Safety guard: If in group mode and no valid group sink exists, ensure primary group sink is targeted
+    if (!targets.length) {
+      targets.push(getPrimaryGroupSink());
     }
   }
   if (sinkMode === 'admin' || sinkMode === 'both') {
@@ -260,6 +283,7 @@ module.exports = {
   getSources,
   saveSources,
   sanitizeChannel,
+  isValidGroupSink,
   SCRAPE_INTERVAL_SECONDS,
   scrapeIntervalMs
 };

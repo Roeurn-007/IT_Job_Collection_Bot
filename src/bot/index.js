@@ -734,9 +734,19 @@ bot.on('message', async (msg) => {
     const val = text.trim();
     delete adminState[adminId];
     if (!val) {
-      return safeSend(msg.chat.id, '⚠️ Please send a valid Chat ID (e.g. -1001234567890).', {
+      return safeSend(msg.chat.id, '⚠️ Please send a valid Chat ID (e.g. -1004469567529).', {
         reply_markup: getCancelMarkup('admin_menu_sink')
       });
+    }
+    if (!val.startsWith('-')) {
+      return safeSend(msg.chat.id,
+        `⚠️ Invalid Group Chat ID: "${val}"\n\n` +
+        `This is a private user ID (${val === settings.adminSink ? 'your personal admin ID' : 'user account'}), NOT a group chat!\n` +
+        `Telegram Group and Channel IDs must start with a minus sign (e.g. -1004469567529).\n\n` +
+        `💡 Your correct group ID is: -1004469567529\n` +
+        `💡 Or send /addsink directly INSIDE your Telegram group to add it automatically.`,
+        { reply_markup: getCancelMarkup('admin_menu_sink') }
+      );
     }
     const totalBefore = settings.groupSinks.length;
     if (!settings.groupSinks.includes(val)) {
@@ -1668,12 +1678,23 @@ bot.onText(/^\/addsink(?:\s+(.+))?/i, (msg, m) => {
         `➕ Add Group Destination Sink\n\n` +
         `Please send the Telegram Group Chat ID to add as a destination sink.\n\n` +
         `💡 Example:\n` +
-        `-1001234567890\n\n` +
-        `💡 Or use /addsink in the target group.\n\n` +
+        `-1004469567529\n\n` +
+        `💡 Or use /addsink directly in the target group.\n\n` +
         `(Or tap Cancel below to abort)`,
         getCancelMarkup('admin_menu_sink')
       );
     }
+  }
+
+  if (!targetId.startsWith('-')) {
+    return safeSend(msg.chat.id,
+      `⚠️ Invalid Group Chat ID: "${targetId}"\n\n` +
+      `This is a private user ID (${targetId === settings.adminSink ? 'your personal admin ID' : 'user account'}), NOT a group chat!\n` +
+      `Telegram Group and Supergroup IDs always start with a minus sign (e.g. -1004469567529).\n\n` +
+      `💡 Example:\n` +
+      `/addsink -1004469567529\n\n` +
+      `Or send /addsink directly inside your Telegram group.`
+    );
   }
 
   const totalBefore = settings.groupSinks.length;
@@ -1965,6 +1986,27 @@ bot.onText(/^\/setsink(?:\s+(.+))?/i, (msg, m) => {
       reply_markup: getSinkMenuMarkup()
     });
   }
+
+  // Handle mode shortcuts if passed
+  if (['group', 'admin', 'both'].includes(arg.toLowerCase())) {
+    settings.sinkMode = arg.toLowerCase();
+    settings.saveSink();
+    return safeSend(msg.chat.id, formatSinkModeUpdatedResponse(arg.toLowerCase()), {
+      reply_markup: getSinkMenuMarkup()
+    });
+  }
+
+  if (!arg.startsWith('-')) {
+    return safeSend(msg.chat.id,
+      `⚠️ Invalid Group Chat ID: "${arg}"\n\n` +
+      `This is a private user ID (${arg === settings.adminSink ? 'your personal admin ID' : 'user account'}), NOT a group chat!\n` +
+      `Telegram Group and Supergroup IDs always start with a minus sign (e.g. -1004469567529).\n\n` +
+      `💡 Example:\n` +
+      `/setsink -1004469567529\n\n` +
+      `Or send /setsink directly inside your Telegram group.`
+    );
+  }
+
   const totalBefore = settings.groupSinks.length;
   if (!settings.groupSinks.includes(arg)) {
     settings.groupSinks.push(arg);
